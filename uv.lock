@@ -1,0 +1,19 @@
+version = 1
+revision = 2
+requires-python = ">=3.12"
+
+[[package]]
+name = "atomizer"
+version = "0.0.1"
+source = { virtual = "." }
+dependencies = [
+    { name = "ryskv12" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "ryskv12", git = "https://github.com/wakamex/ryskV12_py.git" }]
+
+[[package]]
+name = "ryskv12"
+version = "0.0.1"
+source = { git = "https://github.com/wakamex/ryskV12_py.git#185e21d8bf1a00f5c599ad565c7b494d14bb3c82" }

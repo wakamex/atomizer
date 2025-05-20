@@ -1,0 +1,61 @@
+[project]
+name = "atomizer"
+version = "0.0.1"
+authors = [{ name = "Mihai Cosma", email = "mcosma@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "ryskv12",
+]
+
+[tool.ruff]
+# Default is: pycodestyle (E) and Pyflakes (F)
+# We add flake8-builtins (A), pydocstyle (D), isort (I), pep8-naming (N), and pylint (PL).
+# We remove pycodestyle (E) since it throws erroneous line too long errors.
+# We remove Pyflakes (F) since it complains about `import *` which we need.
+lint.select = ["A", "D", "I", "N", "PL"]
+
+# We ignore the following rules:
+# A002: Argument `X` is shadowing a Python builtin
+# D100: missing docstring in public module
+# D101: missing docstring in public class
+# D102: missing docstring in public method
+# D103: missing docstring in public function
+# D105: missing docstring in magic method
+# D107: Missing docstring in `__init__`
+# D203: 1 blank line required before class docstring (incompatible with D211: no blank lines before class docstring)
+# D213: multi-line-summary-second-line (incompatible with D212: multi-line summary should start at the first line)
+# D413: Missing blank line after last section
+# D415: First line should end with a period, question mark, or exclamation point (in period-only D400)
+# D416: section-name-ends-in-colon (numpy style guide doesn't use colons after sections, i.e. Parameters)
+# PLR0911: Too many return statements (X > 6)
+# PLR0912: Too many branches (X > 12)
+# PLR0913: Too many arguments to function call (X > 5)
+# PLR0915: Too many statements (X > 50)
+# PLR2004: Magic value used in comparison
+# N803: invalid-argument-name
+# N815: mixed-case-variable-in-class-scope
+lint.ignore = ["A002", "D100", "D101", "D102", "D103", "D105", "D107", "D203", "D213", "D413", "D415", "D416", "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004", "N803", "N815"]
+
+# Allow autofix for all enabled rules (when `--fix`) is provided.
+lint.fixable = ["A", "D", "I", "N", "PL"]
+lint.unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+line-length = 200
+
+# Assume Python 3.12
+target-version = "py312"
+
+[tool.pytest.ini_options]
+python_files = "test_*.py *_test.py"
+python_classes = "Test* test_*"
+python_functions = "test_*"
+testpaths = [
+    "infinity_pools_sdk/tests",
+]
+addopts = "--color=yes -ra -q"
+
+[tool.uv.sources]
+ryskv12 = { git = "https://github.com/wakamex/ryskV12_py.git" }
