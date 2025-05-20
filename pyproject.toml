@@ -5,6 +5,7 @@ authors = [{ name = "Mihai Cosma", email = "mcosma@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
     "ryskv12",
+    "web3>=7.11.1",
 ]
 
 [tool.ruff]

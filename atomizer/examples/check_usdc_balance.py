@@ -7,7 +7,7 @@ import json # For parsing potential JSON output from CLI
 from ryskV12.client import Rysk, Env
 
 # Configuration (mirroring connect_and_identify.py for consistency)
-EXAMPLE_PRIVATE_KEY = os.environ.get("RYSK_PRIVATE_KEY", "0xYOUR_PRIVATE_KEY_HERE_IF_NOT_SET_IN_CLI_CONFIG")
+EXAMPLE_PRIVATE_KEY = os.environ.get("RYSK_PRIVATE_KEY")
 RYSKV12_CLI_PATH = os.environ.get("RYSKV12_CLI_PATH")
 SELECTED_ENV = Env.TESTNET
 TOKEN_SYMBOL_TO_CHECK = "USDC" # Token to check balance for
@@ -16,7 +16,7 @@ TOKEN_SYMBOL_TO_CHECK = "USDC" # Token to check balance for
 # This might be needed for the balances_args method.
 # For this example, users should replace this with their actual account address.
 # Similar to connect_and_identify.py, a real app would have a secure way to get this.
-EXAMPLE_ACCOUNT_ADDRESS = os.environ.get("RYSK_ACCOUNT_ADDRESS", "0xYOUR_ACCOUNT_ADDRESS_HERE")
+EXAMPLE_ACCOUNT_ADDRESS = os.environ.get("RYSK_ACCOUNT_ADDRESS")
 
 
 def get_placeholder_wallet_address(private_key: str) -> str:
