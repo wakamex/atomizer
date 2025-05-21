@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/rysk-finance/rysk-v12-cli/ryskcore" // SDK client
+	"github.com/wakamex/ryskV12-cli/ryskcore" // SDK client
 )
 
 func main() {
