@@ -2,7 +2,7 @@ module examples
 
 go 1.24.2
 
-require github.com/rysk-finance/ryskV12-cli v1.0.3
+require github.com/rysk-finance/rysk-v12-cli v1.0.3
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -34,4 +34,4 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/rysk-finance/ryskV12-cli => ../sdk // Points to your local SDK copy
+replace github.com/rysk-finance/rysk-v12-cli => ../sdk // Points to your local SDK copy
