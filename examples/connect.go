@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt" // For Sprintf
 	"io"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings" // For splitting comma-separated list
 	"syscall"
 	"time"
 
@@ -21,12 +23,13 @@ const (
 )
 
 func main() {
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds) // Add microseconds to log output
-	channelID := flag.String("channel_id", "rysk_ipc_default", "Unique ID for the IPC channel (named pipes will be /tmp/<channel_id>.*.pipe)")
-	websocketURL := flag.String("url", "wss://rip-testnet.rysk.finance/maker", "WebSocket URL to connect to")
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+	channelID := flag.String("channel_id", "rysk_ipc_default", "Unique ID for the IPC channel")
+	websocketURL := flag.String("url", "wss://rip-testnet.rysk.finance/maker", "WebSocket URL for the maker connection")
+	rfqAssetAddressesCSV := flag.String("rfq_asset_addresses", "", "Comma-separated list of asset addresses for RFQ streams (e.g., ETH-PERP,BTC-PERP)")
 	flag.Parse()
 
-	log.Printf("Starting Rysk Connection Daemon for channel: %s, URL: %s", *channelID, *websocketURL)
+	log.Printf("Starting Rysk Connection Daemon for channel: %s, Maker URL: %s", *channelID, *websocketURL)
 
 	// Define pipe paths
 	requestPipePath := filepath.Join(os.TempDir(), *channelID+requestPipeSuffix)
@@ -41,29 +44,23 @@ func main() {
 		os.Remove(responsePipePath)
 	}()
 
-	// Create request pipe
-	if err := syscall.Mkfifo(requestPipePath, pipePerm); err != nil {
-		if !os.IsExist(err) {
-			log.Fatalf("Failed to create request pipe %s: %v", requestPipePath, err)
-		}
-		log.Printf("Warning: Request pipe %s already exists or error creating: %v. Attempting to proceed.", requestPipePath, err)
-	} else {
-		log.Printf("Request pipe %s created successfully.", requestPipePath)
-	}
-
-	// Create response pipe (similar logic for existence) - for future use
-	if err := syscall.Mkfifo(responsePipePath, pipePerm); err != nil {
-		if !os.IsExist(err) {
-			log.Fatalf("Failed to create response pipe %s: %v", responsePipePath, err)
-		}
-		log.Printf("Warning: Response pipe %s already exists or error creating: %v. Attempting to proceed.", responsePipePath, err)
-	} else {
-		log.Printf("Response pipe %s created successfully.", responsePipePath)
-	}
+	createPipeIfNotExists(requestPipePath, "Request")
+	createPipeIfNotExists(responsePipePath, "Response") // For future use
 
 	// Setup context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel() // Ensure cancel is called eventually
+
+	var allClients []*ryskcore.Client
+	defer func() {
+		log.Println("Closing all SDK clients...")
+		for _, client := range allClients {
+			if client != nil {
+				client.Close()
+			}
+		}
+		log.Println("All SDK clients closed.")
+	}()
 
 	// --- SDK Client Initialization ---
 	log.Printf("Attempting to connect to %s using Rysk SDK...", *websocketURL)
@@ -71,17 +68,50 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create/connect SDK client: %v", err)
 	}
+	allClients = append(allClients, sdkClient)
 	log.Println("Successfully created SDK client and connected.")
-	defer sdkClient.Close()
 
-	// --- Set a Handler for Incoming Messages from WebSocket ---
+	// --- Set a Handler for Incoming Messages from Maker WebSocket ---
 	sdkClient.SetHandler(func(message []byte) {
-		log.Printf("SDK Received (from WebSocket): %s", string(message))
+		log.Printf("Maker SDK Received: %s", string(message))
 		// TODO: Later, this handler will need to route responses back to the correct client via the response pipe
 	})
-	log.Println("SDK client is listening for messages from WebSocket.")
+	log.Println("Maker SDK client is listening for messages.")
 
-	// Start IPC request handler in a new goroutine
+	// --- Initialize RFQ Listener SDK Clients for each specified asset address ---
+	if *rfqAssetAddressesCSV != "" {
+		baseURL := strings.TrimSuffix(*websocketURL, "/maker")
+		if baseURL == *websocketURL {
+			log.Printf("Warning: Could not reliably determine base URL from %s to construct RFQ stream URLs. Assuming it's a base URL.", *websocketURL)
+		}
+		assetAddresses := strings.Split(*rfqAssetAddressesCSV, ",")
+		for _, addr := range assetAddresses {
+			trimmedAddr := strings.TrimSpace(addr)
+			if trimmedAddr == "" {
+				continue
+			}
+			rfqStreamURL := fmt.Sprintf("%s/rfqs/%s", baseURL, trimmedAddr)
+			log.Printf("Attempting to connect to RFQ Stream for %s: %s", trimmedAddr, rfqStreamURL)
+
+			// Create a new context for each client to manage its lifecycle independently if needed,
+			// or use the main ctx if their lifecycles are tied.
+			// For simplicity here, using main ctx. Consider implications for individual connection failures.
+			rfqClient, err := ryskcore.NewClient(ctx, rfqStreamURL, nil)
+			if err != nil {
+				log.Printf("Failed to create RFQ Listener SDK client for %s (%s): %v", trimmedAddr, rfqStreamURL, err)
+				continue // Skip to the next address
+			}
+			allClients = append(allClients, rfqClient)
+			// Need to capture addr in the closure correctly for the handler
+			currentAddr := trimmedAddr
+			rfqClient.SetHandler(func(message []byte) {
+				log.Printf("RFQ SDK Received (%s): %s", currentAddr, string(message))
+			})
+			log.Printf("RFQ Listener for %s connected and listening.", currentAddr)
+		}
+	}
+
+	// Start IPC request handler in a new goroutine, using the main maker sdkClient
 	go handleIPCRequests(ctx, requestPipePath, sdkClient)
 
 	// Keep alive, wait for Ctrl+C to terminate this example program
@@ -100,6 +130,18 @@ func main() {
 	}
 
 	log.Println("Daemon shutting down.")
+}
+
+// createPipeIfNotExists creates a named pipe if it doesn't already exist.
+func createPipeIfNotExists(pipePath string, pipeNameForLog string) {
+	if err := syscall.Mkfifo(pipePath, pipePerm); err != nil {
+		if !os.IsExist(err) {
+			log.Fatalf("Failed to create %s pipe %s: %v", pipeNameForLog, pipePath, err)
+		}
+		log.Printf("Warning: %s pipe %s already exists or error creating: %v. Attempting to proceed.", pipeNameForLog, pipePath, err)
+	} else {
+		log.Printf("%s pipe %s created successfully.", pipeNameForLog, pipePath)
+	}
 }
 
 // handleIPCRequests opens the request pipe and processes incoming client requests.
@@ -176,7 +218,7 @@ func readLoop(ctx context.Context, file *os.File, sdkClient *ryskcore.Client) {
 
 				if sdkClient != nil {
 					log.Printf("IPC Request Handler: Forwarding to WebSocket: %s", receivedRequest)
-					sdkClient.Send([]byte(receivedRequest)) // Actually send the request
+					sdkClient.Send([]byte(receivedRequest))
 				}
 			}
 		}
