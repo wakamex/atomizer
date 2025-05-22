@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wakamex/ryskV12-cli/ryskcore"
+	"github.com/wakamex/rysk-v12-cli/ryskcore"
 )
 
 // Mutex and map for debouncing

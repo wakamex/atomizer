@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wakamex/ryskV12-cli/ryskcore" // Re-add ryskcore for type definitions if needed, or ensure types are fully self-contained elsewhere
+	"github.com/wakamex/rysk-v12-cli/ryskcore" // Re-add ryskcore for type definitions if needed, or ensure types are fully self-contained elsewhere
 )
 
 const (

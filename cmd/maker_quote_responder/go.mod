@@ -1,8 +1,10 @@
-module examples
+module github.com/wakamex/atomizer/cmd/maker_quote_responder
 
 go 1.24.2
 
-require github.com/wakamex/ryskV12-cli v1.0.3
+require github.com/wakamex/rysk-v12-cli v0.0.0
+
+replace github.com/wakamex/rysk-v12-cli => ../../sdk
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect

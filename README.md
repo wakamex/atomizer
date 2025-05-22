@@ -34,20 +34,19 @@ combo:
    git submodule update --init --recursive
    ```
 
-## Running the Go Example
+## Maker Quote Responder Application
 
-To run the example program located in the `examples` directory:
+The primary application in this repository is the `maker_quote_responder`, located in the `cmd/maker_quote_responder/` directory. This application connects to the Rysk Finance API, listens for RFQs, and responds with quotes.
 
-1. Navigate to the examples directory:
-   ```bash
-   cd examples
-   ```
+For detailed instructions on how to build, configure, and run the `maker_quote_responder`, please refer to its dedicated README file:
 
-2. Run the main Go program:
-   ```bash
-   go run main.go
-   ```
-   This will compile and execute the example. Dependencies will be automatically downloaded if needed based on `examples/go.mod`.
+[**Maker Quote Responder Instructions (`cmd/maker_quote_responder/README.md`)**](./cmd/maker_quote_responder/README.md)
+
+This guide covers:
+- Prerequisites
+- Building the executable
+- Setting up the `.env` file
+- Running the application using the `run.sh` script
 
 ## Submodule
 
