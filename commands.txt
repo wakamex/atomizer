@@ -1,0 +1,15 @@
+# connect
+go run connect.go --channel_id=test --url=wss://rip-testnet.rysk.finance/maker --rfq_asset_addresses="ETH-PERP,BTC-PERP,SOL-PERP"
+
+# submit rfq
+go run rfq.go --channel_id=test --instrument="ETH-PERP" --quantity="0.1" --side="buy" --request_id="testrfq001"
+
+# quoter
+cd /code/atomizer/examples && MAKER_ADDRESS="0x9eAFc0c2b04D96a1C1edAdda8A474a4506752207" env $(cat .env | grep -v '^#' | xargs) go run maker_quote_responder.go --websocket_url="wss://rip-testnet.rysk.finance/maker" --rfq_asset_addresses="0xb67bfa7b488df4f2efa874f4e59242e9130ae61f" --dummy_price="1250000" --quote_valid_duration_seconds=45
+
+# approve
+./sdk/cmd/ryskV12/ryskV12 approve \
+    --chain_id 84532 \
+    --rpc_url https://sepolia.base.org \
+    --amount 115792089237316195423570985008687907853269984665640564039457584007913129639935 \
+    --private_key $(cat examples/.env | grep PRIVATE_KEY | cut -d '=' -f2)

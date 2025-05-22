@@ -3,6 +3,19 @@
 This repository contains the Atomizer project and its related examples.
 It utilizes the `ryskV12-cli` as a submodule located in the `sdk` directory.
 
+## Progress
+
+sdk actions:
+- [x] approve - leave in the cli
+- [x] balances - debugging
+- [x] connect - working w/ default channel id
+- [ ] positions
+- [x] quote - maker_quote_response.go
+- [ ] transfer
+combo:
+- [x] maker_quote_response.go (connect and quote)
+
+
 ## Prerequisites
 
 - Git
