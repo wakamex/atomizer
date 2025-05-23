@@ -40,13 +40,14 @@ func MakeQuote(req RFQResult, underlying string, originalRfqID string, cfg *AppC
 		Price:        quoteBigInt.Mul(quoteBigInt, new(big.Int).SetInt64(1e10)).String(),
 		Quantity:     req.Quantity,
 		IsTakerBuy:   req.IsTakerBuy,
-		ValidUntil:   time.Now().Unix() + 60,
+		ValidUntil:   time.Now().Unix() + cfg.QuoteValidDurationSeconds,
 	}
 	msgHash, _, err := ryskcore.CreateQuoteMessage(finalQuote)
 	if err != nil {
 		log.Printf("[Quote %s] Error creating quote message for signing: %v", originalRfqID, err)
 		return ryskcore.Quote{}, err
 	}
+
 
 	signature, err := ryskcore.Sign(msgHash, privateKey)
 	if err != nil {

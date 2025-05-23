@@ -34,7 +34,7 @@ func isDebounced(rfqID string) bool {
 // sendQuoteResponse constructs and sends a quote response.
 func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID string, cfg *AppConfig) {
 	var quoteParams ryskcore.Quote
-	
+
 	// Try to get underlying asset from mapping
 	underlying, hasMapping := cfg.AssetMapping[rfq.Asset]
 	if hasMapping {
@@ -141,7 +141,7 @@ func HandleRfqMessage(message []byte, currentAssetAddr string, mainQuoteSenderCl
 		}
 
 		// Send quote using the main client
-		// Note: This is called as a goroutine in the original main's handler. 
+		// Note: This is called as a goroutine in the original main's handler.
 		// Consider if HandleRfqMessage itself should be launched as a goroutine by its caller,
 		// or if sendQuoteResponse should remain a goroutine call if it's long-running.
 		// For now, keeping the go sendQuoteResponse pattern.
