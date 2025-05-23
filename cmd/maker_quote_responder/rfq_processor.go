@@ -34,32 +34,68 @@ func isDebounced(rfqID string) bool {
 
 // sendQuoteResponse constructs and sends a quote response.
 func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID string, cfg *AppConfig) {
-	quoteParams := ryskcore.Quote{
-		AssetAddress: rfq.Asset,
-		ChainID:      rfq.ChainID,
-		Expiry:       rfq.Expiry,
-		IsPut:        rfq.IsPut,
-		IsTakerBuy:   rfq.IsTakerBuy,
-		Maker:        cfg.MakerAddress,
-		Nonce:        fmt.Sprintf("%s-%d", originalRfqID, time.Now().UnixNano()),
-		Price:        cfg.DummyPrice,
-		Quantity:     rfq.Quantity,
-		Strike:       rfq.Strike,
-		ValidUntil:   time.Now().Unix() + cfg.QuoteValidDurationSeconds,
+	var quoteParams ryskcore.Quote
+	
+	// Try to get underlying asset from mapping
+	underlying, hasMapping := cfg.AssetMapping[rfq.Asset]
+	if hasMapping {
+		// Try to use Deribit pricing
+		deribitQuote, err := MakeQuote(rfq, underlying, originalRfqID)
+		if err != nil {
+			log.Printf("[Quote %s] Error getting Deribit quote: %v. Falling back to dummy price.", originalRfqID, err)
+			// Fall back to dummy price
+			quoteParams = ryskcore.Quote{
+				AssetAddress: rfq.Asset,
+				ChainID:      rfq.ChainID,
+				Expiry:       rfq.Expiry,
+				IsPut:        rfq.IsPut,
+				IsTakerBuy:   rfq.IsTakerBuy,
+				Maker:        cfg.MakerAddress,
+				Nonce:        fmt.Sprintf("%s-%d", originalRfqID, time.Now().UnixNano()),
+				Price:        cfg.DummyPrice,
+				Quantity:     rfq.Quantity,
+				Strike:       rfq.Strike,
+				ValidUntil:   time.Now().Unix() + cfg.QuoteValidDurationSeconds,
+			}
+		} else {
+			// Use Deribit quote
+			quoteParams = deribitQuote
+			// Override ValidUntil to use config value
+			quoteParams.ValidUntil = time.Now().Unix() + cfg.QuoteValidDurationSeconds
+		}
+	} else {
+		// No mapping available, use dummy price
+		log.Printf("[Quote %s] No asset mapping for %s. Using dummy price.", originalRfqID, rfq.Asset)
+		quoteParams = ryskcore.Quote{
+			AssetAddress: rfq.Asset,
+			ChainID:      rfq.ChainID,
+			Expiry:       rfq.Expiry,
+			IsPut:        rfq.IsPut,
+			IsTakerBuy:   rfq.IsTakerBuy,
+			Maker:        cfg.MakerAddress,
+			Nonce:        fmt.Sprintf("%s-%d", originalRfqID, time.Now().UnixNano()),
+			Price:        cfg.DummyPrice,
+			Quantity:     rfq.Quantity,
+			Strike:       rfq.Strike,
+			ValidUntil:   time.Now().Unix() + cfg.QuoteValidDurationSeconds,
+		}
 	}
 
-	msgHash, _, err := ryskcore.CreateQuoteMessage(quoteParams)
-	if err != nil {
-		log.Printf("[Quote %s] Error creating quote message for signing: %v", originalRfqID, err)
-		return
-	}
+	// If the quote already has a signature (from MakeQuote), skip signing
+	if quoteParams.Signature == "" {
+		msgHash, _, err := ryskcore.CreateQuoteMessage(quoteParams)
+		if err != nil {
+			log.Printf("[Quote %s] Error creating quote message for signing: %v", originalRfqID, err)
+			return
+		}
 
-	signature, err := ryskcore.Sign(msgHash, cfg.PrivateKey)
-	if err != nil {
-		log.Printf("[Quote %s] Error signing quote message: %v", originalRfqID, err)
-		return
+		signature, err := ryskcore.Sign(msgHash, cfg.PrivateKey)
+		if err != nil {
+			log.Printf("[Quote %s] Error signing quote message: %v", originalRfqID, err)
+			return
+		}
+		quoteParams.Signature = signature
 	}
-	quoteParams.Signature = signature
 
 	quoteParamsBytes, err := json.Marshal(quoteParams)
 	if err != nil {

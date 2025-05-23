@@ -58,3 +58,10 @@ type RFQResult struct {
 	ReceivedTS int64  `json:"-"` // Local timestamp when RFQ was processed
 }
 
+// CCXTOrderBook represents the order book structure from CCXT exchange
+type CCXTOrderBook struct {
+	Bids  [][]float64 // Array of [price, amount] pairs
+	Asks  [][]float64 // Array of [price, amount] pairs
+	Index float64     // Index price of the underlying asset
+}
+

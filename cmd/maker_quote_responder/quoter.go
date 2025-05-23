@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"math"
@@ -12,8 +11,7 @@ import (
 	"time"
 
 	"github.com/wakamex/rysk-v12-cli/ryskcore"
-	"github.com/ccxt/ccxt/go/v4/go"
-
+	ccxt "github.com/ccxt/ccxt/go/v4"
 )
 
 // the purpose of this module is to take in a given option request confirmation, return a quote for that option
@@ -91,42 +89,33 @@ func getOrderBook(req RFQResult, asset string) (CCXTOrderBook, error) {
 	}
 
 	// Initialize CCXT exchange
-	exchange, err := ccxt.NewExchange("deribit")
-	if err != nil {
-		return CCXTOrderBook{}, fmt.Errorf("failed to initialize CCXT exchange: %v", err)
-	}
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	exchange := ccxt.NewDeribit(map[string]interface{}{
+		"rateLimit": 10,
+		"enableRateLimit": true,
+	})
 
 	// Fetch order book
-	orderBook, err := exchange.FetchOrderBook(ctx, instrumentName, 20, nil)
+	orderBook, err := exchange.FetchOrderBook(instrumentName)
 	if err != nil {
 		return CCXTOrderBook{}, fmt.Errorf("failed to fetch order book: %v", err)
 	}
 
 	// Fetch ticker for index price
-	ticker, err := exchange.FetchTicker(ctx, asset+"-PERP", nil)
+	ticker, err := exchange.FetchTicker(asset + "-PERP")
 	if err != nil {
 		return CCXTOrderBook{}, fmt.Errorf("failed to fetch ticker: %v", err)
 	}
 
 	// Convert order book to our structure
 	book := CCXTOrderBook{
-		Bids:  make([][]float64, len(orderBook.Bids)),
-		Asks:  make([][]float64, len(orderBook.Asks)),
-		Index: ticker.Last,
+		Bids:  orderBook.Bids,
+		Asks:  orderBook.Asks,
+		Index: 0.0,
 	}
-
-	// Convert bids
-	for i, bid := range orderBook.Bids {
-		book.Bids[i] = []float64{bid.Price, bid.Amount}
-	}
-
-	// Convert asks
-	for i, ask := range orderBook.Asks {
-		book.Asks[i] = []float64{ask.Price, ask.Amount}
+	
+	// Handle ticker.Last being a pointer
+	if ticker.Last != nil {
+		book.Index = *ticker.Last
 	}
 
 	return book, nil

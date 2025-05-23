@@ -14,6 +14,7 @@ type AppConfig struct {
 	PrivateKey                string
 	DummyPrice                string
 	QuoteValidDurationSeconds int64
+	AssetMapping              map[string]string // Maps asset addresses to underlying symbols (ETH, BTC, SOL)
 }
 
 // LoadConfig parses command-line flags and environment variables
@@ -38,6 +39,13 @@ func LoadConfig() *AppConfig {
 	}
 	if cfg.PrivateKey == "" {
 		log.Fatal("Error: PRIVATE_KEY environment variable is not set or empty.")
+	}
+
+	// Initialize asset mapping
+	// TODO: This should be configurable via environment variables or config file
+	cfg.AssetMapping = map[string]string{
+		"0xb67bfa7b488df4f2efa874f4e59242e9130ae61f": "ETH", // Example mapping for testnet
+		// Add more mappings as needed
 	}
 
 	return cfg
