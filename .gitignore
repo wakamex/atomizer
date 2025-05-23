@@ -1,3 +1,6 @@
 .env
+.claude
+# Exclude the binary specifically (not the directory)
 cmd/maker_quote_responder/maker_quote_responder
-maker_quote_responder
+# If there's a binary at root level, exclude it too
+/maker_quote_responder
