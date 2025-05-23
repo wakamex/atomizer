@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/wakamex/rysk-v12-cli/ryskcore"
@@ -65,7 +64,7 @@ func getDeribitQuote(req RFQResult, asset string) (string, float64, error) {
 	if err != nil {
 		return "", 0.0, err
 	}
-	dollarPrice, err := getPriceInclSlippage(req, book, asset)
+	dollarPrice, err := getPriceInclSlippage(req, book)
 	if err != nil {
 		log.Print(err)
 		return "", 0, err
@@ -94,34 +93,61 @@ func getOrderBook(req RFQResult, asset string) (CCXTOrderBook, error) {
 		"enableRateLimit": true,
 	})
 
+	// CCXT requires the symbol format with prefix for options
+	ccxtSymbol := fmt.Sprintf("%s/USD:%s", asset, instrumentName)
+	
 	// Fetch order book
-	orderBook, err := exchange.FetchOrderBook(instrumentName)
+	orderBook, err := exchange.FetchOrderBook(ccxtSymbol)
 	if err != nil {
 		return CCXTOrderBook{}, fmt.Errorf("failed to fetch order book: %v", err)
 	}
 
-	// Fetch ticker for index price
-	ticker, err := exchange.FetchTicker(asset + "-PERP")
+	// Fetch ticker for the option instrument to get its price
+	optionTicker, err := exchange.FetchTicker(ccxtSymbol)
 	if err != nil {
-		return CCXTOrderBook{}, fmt.Errorf("failed to fetch ticker: %v", err)
+		return CCXTOrderBook{}, fmt.Errorf("failed to fetch option ticker: %v", err)
+	}
+
+	// Get the underlying index price from the option ticker
+	indexPrice := 0.0
+	if optionTicker.Info != nil {
+		// Deribit option tickers include underlying price in the info
+		if underlyingPrice, exists := optionTicker.Info["underlying_price"]; exists {
+			if price, ok := underlyingPrice.(float64); ok {
+				indexPrice = price
+			}
+		}
+	}
+	
+	// If we couldn't get index price from option ticker, try to fetch spot/futures
+	if indexPrice == 0.0 {
+		// Try different instrument names that Deribit might support
+		possibleIndexInstruments := []string{
+			asset + "-PERPETUAL",      // This is the correct format for Deribit
+			asset + "_USDC-PERPETUAL",
+			asset + "_USD-PERPETUAL",
+		}
+		
+		for _, instrument := range possibleIndexInstruments {
+			indexTicker, err := exchange.FetchTicker(instrument)
+			if err == nil && indexTicker.Last != nil {
+				indexPrice = *indexTicker.Last
+				break
+			}
+		}
 	}
 
 	// Convert order book to our structure
 	book := CCXTOrderBook{
 		Bids:  orderBook.Bids,
 		Asks:  orderBook.Asks,
-		Index: 0.0,
-	}
-	
-	// Handle ticker.Last being a pointer
-	if ticker.Last != nil {
-		book.Index = *ticker.Last
+		Index: indexPrice,
 	}
 
 	return book, nil
 }
 
-func getPriceInclSlippage(req RFQResult, book CCXTOrderBook, asset string) (float64, error) {
+func getPriceInclSlippage(req RFQResult, book CCXTOrderBook) (float64, error) {
 	amountBigInt, _ := new(big.Int).SetString(req.Quantity, 10)
 	amount := amountBigInt.Div(amountBigInt, new(big.Int).SetUint64(1e13)).String()
 	// convert the amount string to a float
@@ -187,7 +213,8 @@ func convertOptionDetailsToInstrument(
 	strike = strikeBigInt.Div(strikeBigInt, new(big.Int).SetUint64(1e8)).String()
 
 	// convert the expiry from a timestamp seconds into a deribit compatible date time
-	deribitExpiry := strings.ToUpper(time.Unix(expiry, 0).Format("2Jan06"))
+	// Deribit uses YYMMDD format
+	deribitExpiry := time.Unix(expiry, 0).Format("060102")
 	// convert isPut to "C" or "P"
 	optionType := "C"
 	if isPut {
@@ -195,8 +222,8 @@ func convertOptionDetailsToInstrument(
 		return "", fmt.Errorf("puts not supported")
 	}
 
-	// construct the instrument name in Deribit format: ASSET-DDMMMYY-STRIKE-C/P
-	// e.g., BTC-31JAN25-50000-C for a BTC call option
+	// construct the instrument name in Deribit format: ASSET-YYMMDD-STRIKE-C/P
+	// e.g., ETH-250530-3000-C for an ETH call option expiring May 30, 2025
 	instrumentName := fmt.Sprintf("%s-%s-%s-%s", asset, deribitExpiry, strike, optionType)
 	return instrumentName, nil
 }
