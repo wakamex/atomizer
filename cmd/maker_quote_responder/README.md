@@ -47,7 +47,7 @@ The `run.sh` script is pre-configured with default values for command-line argum
 
 *   `MAKER_ADDRESS`: Your Ethereum maker address (e.g., `0x9eAFc0c2b04D96a1C1edAdda8A474a4506752207`).
 *   `WEBSOCKET_URL`: The Rysk Finance WebSocket URL (e.g., `wss://rip-testnet.rysk.finance/maker`).
-*   `RFQ_ASSET_ADDRESSES_CSV`: Comma-separated list of RFQ asset addresses (e.g., `0xb67bfa7b488df4f2efa874f4e59242e9130ae61f`). This will be passed to the `--rfq_asset_addresses_csv` flag.
+*   `RFQ_ASSET_ADDRESSES`: Comma-separated list of RFQ asset addresses (e.g., `0xb67bfa7b488df4f2efa874f4e59242e9130ae61f`). This will be passed to the `--rfq_asset_addresses` flag.
 *   `DUMMY_PRICE`: The dummy price to use for quotes (e.g., `12500000000000000000`).
 *   `QUOTE_VALID_DURATION_SECONDS`: Duration in seconds for how long the quote should be valid (e.g., `45`).
 
@@ -60,7 +60,7 @@ MAKER_ADDRESS="your_maker_address" \
 env $(cat .env | grep -v '^#' | xargs) \
 ./maker_quote_responder \
   --websocket_url="wss://your_websocket_url/maker" \
-  --rfq_asset_addresses_csv="your_rfq_asset_address1,your_rfq_asset_address2" \
+  --rfq_asset_addresses="your_rfq_asset_address1,your_rfq_asset_address2" \
   --dummy_price="your_dummy_price" \
   --quote_valid_duration_seconds=your_duration
 ```
@@ -75,7 +75,7 @@ env $(cat .env | grep -v '^#' | xargs) \
 
 *   `--maker_address` or `MAKER_ADDRESS` env var: (Required) Your Ethereum maker address.
 *   `--websocket_url`: (Required) The WebSocket URL for the Rysk Finance maker API.
-*   `--rfq_asset_addresses_csv` or `RFQ_ASSET_ADDRESSES_CSV` env var: (Required) Comma-separated list of asset addresses to subscribe to for RFQs.
+*   `--rfq_asset_addresses` or `RFQ_ASSET_ADDRESSES` env var: (Required) Comma-separated list of asset addresses to subscribe to for RFQs.
 *   `--dummy_price`: (Required) The dummy price to be used in quote responses.
 *   `--quote_valid_duration_seconds`: (Optional, default: `30`) The duration in seconds for which the quote is valid.
 

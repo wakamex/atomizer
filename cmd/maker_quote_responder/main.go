@@ -87,7 +87,7 @@ appRunningLoop:
 			if baseResponse.Result != nil {
 				var resultStr string
 				if err := json.Unmarshal(baseResponse.Result, &resultStr); err == nil && strings.ToUpper(resultStr) == "OK" {
-					log.Printf("[%s] Received 'OK' confirmation for ID %s.", clientIdentifier, baseResponse.ID)
+					log.Printf("[%s] Received 'OK' confirmation for ID %s. Full message: %s", clientIdentifier, baseResponse.ID, string(message))
 					return
 				}
 				log.Printf("[%s] Received Result for ID %s: %s", clientIdentifier, baseResponse.ID, string(baseResponse.Result))
