@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"math/big"
-	"os"
 	"strconv"
 	"time"
 
@@ -19,7 +18,7 @@ import (
 // / the underlying must be a string that is either "ETH", "BTC" or "SOL" (essentially the primary asset, not the LST)
 // / the expiry must be provided in the format "DDMMMYY" (e.g. "31JAN25") (note that on deribit if the first number is 0, it will cut it e.g. 6JAN25)
 // / quantity in normal numbers
-func MakeQuote(req RFQResult, underlying string, originalRfqID string) (ryskcore.Quote, error) {
+func MakeQuote(req RFQResult, underlying string, originalRfqID string, cfg *AppConfig) (ryskcore.Quote, error) {
 	quote, _, err := getDeribitQuote(req, underlying)
 	if err != nil {
 		return ryskcore.Quote{}, err
@@ -28,8 +27,8 @@ func MakeQuote(req RFQResult, underlying string, originalRfqID string) (ryskcore
 	if !ok {
 		return ryskcore.Quote{}, fmt.Errorf("bad quote conversion: %s", quote)
 	}
-	maker := os.Getenv("MAKER_ADDRESS")
-	privateKey := os.Getenv("PRIVATE_KEY")
+	maker := cfg.MakerAddress
+	privateKey := cfg.PrivateKey
 	finalQuote := ryskcore.Quote{
 		AssetAddress: req.Asset,
 		ChainID:      req.ChainID,
@@ -37,7 +36,7 @@ func MakeQuote(req RFQResult, underlying string, originalRfqID string) (ryskcore
 		Strike:       req.Strike,
 		Expiry:       req.Expiry,
 		Maker:        maker,
-		Nonce:        strconv.FormatInt(time.Now().UnixMicro(), 10),
+		Nonce:        originalRfqID,
 		Price:        quoteBigInt.Mul(quoteBigInt, new(big.Int).SetInt64(1e10)).String(),
 		Quantity:     req.Quantity,
 		IsTakerBuy:   req.IsTakerBuy,

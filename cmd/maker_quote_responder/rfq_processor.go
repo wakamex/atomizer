@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -40,7 +39,7 @@ func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID str
 	underlying, hasMapping := cfg.AssetMapping[rfq.Asset]
 	if hasMapping {
 		// Try to use Deribit pricing
-		deribitQuote, err := MakeQuote(rfq, underlying, originalRfqID)
+		deribitQuote, err := MakeQuote(rfq, underlying, originalRfqID, cfg)
 		if err != nil {
 			log.Printf("[Quote %s] Error getting Deribit quote: %v. Falling back to dummy price.", originalRfqID, err)
 			// Fall back to dummy price
@@ -51,7 +50,7 @@ func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID str
 				IsPut:        rfq.IsPut,
 				IsTakerBuy:   rfq.IsTakerBuy,
 				Maker:        cfg.MakerAddress,
-				Nonce:        fmt.Sprintf("%s-%d", originalRfqID, time.Now().UnixNano()),
+				Nonce:        originalRfqID,
 				Price:        cfg.DummyPrice,
 				Quantity:     rfq.Quantity,
 				Strike:       rfq.Strike,
@@ -73,7 +72,7 @@ func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID str
 			IsPut:        rfq.IsPut,
 			IsTakerBuy:   rfq.IsTakerBuy,
 			Maker:        cfg.MakerAddress,
-			Nonce:        fmt.Sprintf("%s-%d", originalRfqID, time.Now().UnixNano()),
+			Nonce:        originalRfqID,
 			Price:        cfg.DummyPrice,
 			Quantity:     rfq.Quantity,
 			Strike:       rfq.Strike,

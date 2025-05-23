@@ -49,9 +49,20 @@ fi
 # This makes PRIVATE_KEY available to the Go application
 export $(grep -v '^#' .env | grep -v '^$' | xargs)
 
+# Print details before running
+echo "Maker Address: $MAKER_ADDRESS"
+echo "WebSocket URL: $WEBSOCKET_URL"
+echo "RFQ Asset Addresses: $RFQ_ASSET_ADDRESSES"
+echo "Dummy Price: $DUMMY_PRICE"
+echo "Quote Valid Duration Seconds: $QUOTE_VALID_DURATION_SECONDS"
+
 # Check if PRIVATE_KEY is set after attempting to load .env
 if [ -z "$PRIVATE_KEY" ]; then
     echo "Error: PRIVATE_KEY is not set in your .env file or as an environment variable."
+    exit 1
+elif  # check if it's in the right format: 0x + 64 hex characters
+    [[ ! "$PRIVATE_KEY" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+    echo "Error: PRIVATE_KEY is not in the correct format."
     exit 1
 fi
 
