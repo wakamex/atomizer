@@ -53,6 +53,7 @@ type VolSurfaceAnalyzer struct {
 	spotPrice    float64
 	riskFreeRate float64
 	surface      *SVISurface
+	ssviSurface  *SSVISurface
 	cleaner      *DataCleaner
 }
 
@@ -436,9 +437,67 @@ func (vsa *VolSurfaceAnalyzer) CleanData() (cleanedOptions, filteredOptions []Op
 
 // FitSVISurface fits the SVI model to the cleaned data
 func (vsa *VolSurfaceAnalyzer) FitSVISurface() error {
-	log.Println("Fitting SVI volatility surface...")
+	log.Println("Fitting volatility surfaces...")
 	
-	surface, err := FitVolatilitySurface(vsa.options, vsa.spotPrice, vsa.riskFreeRate)
+	// First, apply strict preprocessing for SVI fitting
+	// TEMPORARY: Use all cleaned options instead of aggressive preprocessing
+	preprocessedOptions := vsa.options // PreprocessOptionsForSVI(vsa.options, vsa.spotPrice)
+	log.Printf("Using %d options for SVI fitting (from %d cleaned)", len(preprocessedOptions), len(vsa.options))
+	
+	// Debug: show distribution of preprocessed data
+	if len(preprocessedOptions) > 0 {
+		minIV, maxIV := preprocessedOptions[0].ImpliedVolatility, preprocessedOptions[0].ImpliedVolatility
+		sumIV := 0.0
+		for _, opt := range preprocessedOptions {
+			if opt.ImpliedVolatility < minIV {
+				minIV = opt.ImpliedVolatility
+			}
+			if opt.ImpliedVolatility > maxIV {
+				maxIV = opt.ImpliedVolatility
+			}
+			sumIV += opt.ImpliedVolatility
+		}
+		avgIV := sumIV / float64(len(preprocessedOptions))
+		log.Printf("Preprocessed data IV range: %.1f%% - %.1f%%, avg: %.1f%%", 
+			minIV*100, maxIV*100, avgIV*100)
+		
+		// Show moneyness distribution
+		moneynessCount := make(map[string]int)
+		for _, opt := range preprocessedOptions {
+			moneyness := opt.Strike / vsa.spotPrice
+			switch {
+			case moneyness < 0.8:
+				moneynessCount["<0.8"]++
+			case moneyness < 0.95:
+				moneynessCount["0.8-0.95"]++
+			case moneyness < 1.05:
+				moneynessCount["0.95-1.05 (ATM)"]++
+			case moneyness < 1.2:
+				moneynessCount["1.05-1.2"]++
+			default:
+				moneynessCount[">1.2"]++
+			}
+		}
+		log.Println("Moneyness distribution:")
+		for k, v := range moneynessCount {
+			log.Printf("  %s: %d options", k, v)
+		}
+	}
+	
+	// Try SSVI fitting first (global fit)
+	log.Println("Attempting SSVI (Surface SVI) fitting...")
+	ssviSurface, err := FitSSVISurface(preprocessedOptions, vsa.spotPrice, vsa.riskFreeRate)
+	if err != nil {
+		log.Printf("SSVI fitting failed: %v", err)
+	} else {
+		vsa.ssviSurface = ssviSurface
+		log.Printf("✅ SSVI fitted successfully: Theta=%.4f, Rho=%.4f, Phi=%.4f",
+			ssviSurface.Parameters.Theta, ssviSurface.Parameters.Rho, ssviSurface.Parameters.Phi)
+	}
+	
+	// Also fit slice-by-slice SVI with improved constraints
+	log.Println("Fitting slice-by-slice SVI with regularization...")
+	surface, err := FitVolatilitySurfaceWithConstraints(preprocessedOptions, vsa.spotPrice, vsa.riskFreeRate)
 	if err != nil {
 		return fmt.Errorf("failed to fit volatility surface: %v", err)
 	}
@@ -476,10 +535,20 @@ func (vsa *VolSurfaceAnalyzer) CheckArbitrage() []ArbitrageViolation {
 
 // GetFittedIV returns the fitted implied volatility for any strike and expiry
 func (vsa *VolSurfaceAnalyzer) GetFittedIV(strike, timeToExpiry float64) float64 {
-	if vsa.surface == nil {
-		return 0
+	// Prefer SSVI if available (it's arbitrage-free by construction)
+	if vsa.ssviSurface != nil {
+		iv := vsa.ssviSurface.GetIV(strike, timeToExpiry)
+		// Debug first few calls
+		if strike == 1750.0 && timeToExpiry < 0.02 {
+			log.Printf("SSVI GetIV: strike=%.0f, tte=%.3f -> IV=%.4f", strike, timeToExpiry, iv)
+		}
+		return iv
 	}
-	return vsa.surface.GetIV(strike, timeToExpiry)
+	// Fall back to slice-by-slice SVI
+	if vsa.surface != nil {
+		return vsa.surface.GetIV(strike, timeToExpiry)
+	}
+	return 0
 }
 
 // GetSurface returns the fitted SVI surface

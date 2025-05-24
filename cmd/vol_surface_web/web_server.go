@@ -77,6 +77,7 @@ func (ws *WebServer) Start(port int) error {
 	http.HandleFunc("/api/surface", ws.handleSurfaceData)
 	http.HandleFunc("/api/points", ws.handlePointsData)
 	http.HandleFunc("/api/fitted-surface", ws.handleFittedSurface)
+	http.HandleFunc("/api/debug-surface", ws.handleDebugSurface)
 	
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("Starting web server on http://localhost%s", addr)
@@ -592,19 +593,30 @@ func (ws *WebServer) handleFittedSurface(w http.ResponseWriter, r *http.Request)
 	
 	// Generate IV grid
 	data.IVGrid = make([][]float64, gridSize)
+	minIV, maxIV := 999.0, 0.0
 	for i := 0; i < gridSize; i++ {
 		data.IVGrid[i] = make([]float64, gridSize)
 		for j := 0; j < gridSize; j++ {
-			if ws.analyzer.surface != nil {
+			if ws.analyzer.surface != nil || ws.analyzer.ssviSurface != nil {
 				// Use fitted surface
 				iv := ws.analyzer.GetFittedIV(strikes[j], times[i])
 				data.IVGrid[i][j] = iv * 100 // Convert to percentage
+				
+				// Track min/max for debugging
+				if data.IVGrid[i][j] < minIV && data.IVGrid[i][j] > 0 {
+					minIV = data.IVGrid[i][j]
+				}
+				if data.IVGrid[i][j] > maxIV {
+					maxIV = data.IVGrid[i][j]
+				}
 			} else {
 				// Fallback: simple interpolation
 				data.IVGrid[i][j] = 50.0 // Default 50% vol
 			}
 		}
 	}
+	
+	log.Printf("Generated fitted surface grid: IV range %.1f%% - %.1f%%", minIV, maxIV)
 	
 	// Add raw data points for comparison (included in surface fitting)
 	for _, opt := range ws.analyzer.options {
@@ -647,4 +659,59 @@ func cleanFittedSurfaceForJSON(data FittedSurfaceData) FittedSurfaceData {
 		}
 	}
 	return data
+}
+
+
+// handleDebugSurface provides debug information about the fitted surface
+func (ws *WebServer) handleDebugSurface(w http.ResponseWriter, r *http.Request) {
+	debug := map[string]interface{}{}
+	
+	// Test specific points
+	testStrikes := []float64{2500, 3000, 3500, 4000, 4500}
+	testTTMs := []float64{0.1, 0.25, 0.5}
+	
+	results := []map[string]float64{}
+	
+	for _, strike := range testStrikes {
+		for _, ttm := range testTTMs {
+			iv := ws.analyzer.GetFittedIV(strike, ttm)
+			results = append(results, map[string]float64{
+				"strike": strike,
+				"ttm": ttm,
+				"iv": iv * 100,
+			})
+		}
+	}
+	
+	debug["test_points"] = results
+	
+	// Add SSVI parameters if available
+	if ws.analyzer.ssviSurface != nil {
+		debug["ssvi_params"] = map[string]float64{
+			"theta": ws.analyzer.ssviSurface.Parameters.Theta,
+			"rho": ws.analyzer.ssviSurface.Parameters.Rho,
+			"phi": ws.analyzer.ssviSurface.Parameters.Phi,
+		}
+	}
+	
+	// Add some raw data points for comparison
+	rawPoints := []map[string]float64{}
+	count := 0
+	for _, opt := range ws.analyzer.options {
+		if count >= 10 {
+			break
+		}
+		if !math.IsNaN(opt.ImpliedVolatility) && opt.ImpliedVolatility > 0 {
+			rawPoints = append(rawPoints, map[string]float64{
+				"strike": opt.Strike,
+				"ttm": opt.TimeToExpiry,
+				"market_iv": opt.ImpliedVolatility * 100,
+			})
+			count++
+		}
+	}
+	debug["raw_points"] = rawPoints
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(debug)
 }

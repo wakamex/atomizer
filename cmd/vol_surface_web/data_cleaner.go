@@ -31,13 +31,13 @@ type DataCleaner struct {
 // NewDataCleaner creates a new data cleaner with default parameters
 func NewDataCleaner() *DataCleaner {
 	return &DataCleaner{
-		MaxSpreadPct:    20.0,  // 20% max spread
-		MinVolume:       10,    // Minimum 10 contracts volume for deep OTM/ITM
-		MinMoneyness:    0.5,   // 50% of spot
-		MaxMoneyness:    2.0,   // 200% of spot
-		MinIV:           0.05,  // 5% minimum IV
-		MaxIV:           5.0,   // 500% maximum IV
-		MinDaysToExpiry: 0.1,   // 0.1 days minimum
+		MaxSpreadPct:    10.0,  // 10% max spread (more strict for crypto)
+		MinVolume:       5,     // Minimum 5 contracts volume for deep OTM/ITM
+		MinMoneyness:    0.6,   // 60% of spot (based on Deribit data)
+		MaxMoneyness:    1.8,   // 180% of spot (based on Deribit data)
+		MinIV:           0.3,   // 30% minimum IV (Deribit rarely below this)
+		MaxIV:           2.5,   // 250% maximum IV (realistic for crypto)
+		MinDaysToExpiry: 1.0,   // 1 day minimum
 	}
 }
 
@@ -272,4 +272,104 @@ func (dc *DataCleaner) PrintDataQualityReport() {
 	if m.OutlierOptions > 0 {
 		fmt.Printf("  - IV outliers: %d\n", m.OutlierOptions)
 	}
+}
+
+// PreprocessOptionsForSVI applies strict filtering for SVI/SSVI fitting
+func PreprocessOptionsForSVI(options []OptionData, spotPrice float64) []OptionData {
+	filtered := []OptionData{}
+	
+	for _, opt := range options {
+		// Skip if no valid IV
+		if math.IsNaN(opt.ImpliedVolatility) || opt.ImpliedVolatility <= 0 {
+			continue
+		}
+		
+		// Remove extreme moneyness (based on Deribit market data)
+		// Active trading typically from 0.6 to 1.8 moneyness
+		moneyness := opt.Strike / spotPrice
+		if moneyness < 0.6 || moneyness > 1.8 {
+			continue
+		}
+		
+		// Remove suspiciously low IV (10% minimum)
+		if opt.ImpliedVolatility < 0.1 {
+			continue
+		}
+		
+		// Remove extremely high IV
+		if opt.ImpliedVolatility > 5.0 {
+			continue
+		}
+		
+		// Remove illiquid options more aggressively
+		if opt.Volume < 5 && opt.OpenInterest < 20 {
+			continue
+		}
+		
+		// Remove options with wide spreads
+		if opt.SpreadPct > 10 {
+			continue
+		}
+		
+		// Remove very short-dated options
+		if opt.DaysToExpiry < 1 {
+			continue
+		}
+		
+		// Remove very long-dated options (> 1 year)
+		if opt.DaysToExpiry > 365 {
+			continue
+		}
+		
+		filtered = append(filtered, opt)
+	}
+	
+	// Additional filtering: remove statistical outliers within each expiry group
+	filtered = removeOutliersPerExpiry(filtered)
+	
+	return filtered
+}
+
+// removeOutliersPerExpiry removes IV outliers within each expiry group
+func removeOutliersPerExpiry(options []OptionData) []OptionData {
+	// Group by expiry
+	expiryGroups := make(map[float64][]OptionData)
+	for _, opt := range options {
+		// Round expiry to nearest day for grouping
+		expiryKey := math.Round(opt.DaysToExpiry)
+		expiryGroups[expiryKey] = append(expiryGroups[expiryKey], opt)
+	}
+	
+	filtered := []OptionData{}
+	
+	for _, group := range expiryGroups {
+		if len(group) < 5 {
+			// Keep all if too few points
+			filtered = append(filtered, group...)
+			continue
+		}
+		
+		// Calculate IV statistics for this expiry
+		ivs := make([]float64, len(group))
+		for i, opt := range group {
+			ivs[i] = opt.ImpliedVolatility
+		}
+		
+		// Calculate quartiles
+		q1, q3 := calculateQuartiles(ivs)
+		iqr := q3 - q1
+		
+		// More conservative bounds for SVI fitting
+		lowerBound := q1 - 1.0*iqr // Instead of 1.5*IQR
+		upperBound := q3 + 1.0*iqr
+		
+		// Filter based on bounds
+		for _, opt := range group {
+			if opt.ImpliedVolatility >= lowerBound && opt.ImpliedVolatility <= upperBound {
+				filtered = append(filtered, opt)
+			}
+		}
+	}
+	
+	return filtered
 }
