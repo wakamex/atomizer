@@ -14,37 +14,46 @@ import (
 
 // OptionData represents a single option's market data
 type OptionData struct {
-	Symbol          string
-	Type            string // "C" or "P"
-	Strike          float64
-	Expiry          time.Time
-	DaysToExpiry    float64
-	BidETH          float64
-	AskETH          float64
-	MidETH          float64
-	LastETH         float64
-	SpreadETH       float64
-	SpreadPct       float64
-	BidUSD          float64
-	AskUSD          float64
-	MidUSD          float64
-	Volume          float64
-	OpenInterest    float64
-	IV              float64 // Implied Volatility
-	Delta           float64
-	Gamma           float64
-	Theta           float64
-	Vega            float64
-	ETHIndexPrice   float64
-	Moneyness       float64
-	TimeToExpiryYrs float64
+	Symbol            string
+	Type              string // "C" or "P"
+	Strike            float64
+	Expiry            time.Time
+	DaysToExpiry      float64
+	BidETH            float64
+	AskETH            float64
+	MidETH            float64
+	LastETH           float64
+	SpreadETH         float64
+	SpreadPct         float64
+	BidUSD            float64
+	AskUSD            float64
+	MidUSD            float64
+	Volume            float64
+	OpenInterest      float64
+	IV                float64 // Implied Volatility from exchange
+	Delta             float64
+	Gamma             float64
+	Theta             float64
+	Vega              float64
+	ETHIndexPrice     float64
+	Moneyness         float64
+	TimeToExpiryYrs   float64
+	
+	// Additional fields for our analysis
+	IsPut             bool
+	TimeToExpiry      float64 // In years
+	ImpliedVolatility float64 // Our calculated IV
+	MarketPriceETH    float64 // The price we use for IV calc
 }
 
 // VolSurfaceAnalyzer handles volatility surface analysis
 type VolSurfaceAnalyzer struct {
-	options   []OptionData
-	exchange  *ccxt.Deribit
-	spotPrice float64
+	options      []OptionData
+	exchange     *ccxt.Deribit
+	spotPrice    float64
+	riskFreeRate float64
+	surface      *SVISurface
+	cleaner      *DataCleaner
 }
 
 // NewVolSurfaceAnalyzer creates a new volatility surface analyzer
@@ -55,8 +64,10 @@ func NewVolSurfaceAnalyzer() *VolSurfaceAnalyzer {
 	})
 	
 	return &VolSurfaceAnalyzer{
-		options:  make([]OptionData, 0),
-		exchange: &exchange,
+		options:      make([]OptionData, 0),
+		exchange:     &exchange,
+		riskFreeRate: 0.05, // Default 5%
+		cleaner:      NewDataCleaner(),
 	}
 }
 
@@ -177,6 +188,10 @@ func (vsa *VolSurfaceAnalyzer) CalculateImpliedVolatilities() {
 	for i := range vsa.options {
 		option := &vsa.options[i]
 		
+		// Populate additional fields
+		option.IsPut = (option.Type == "P")
+		option.TimeToExpiry = option.TimeToExpiryYrs
+		
 		// Get market price (prefer MidETH, fall back to LastETH)
 		var marketPriceETH float64
 		if !math.IsNaN(option.MidETH) && option.MidETH > 0 {
@@ -186,6 +201,8 @@ func (vsa *VolSurfaceAnalyzer) CalculateImpliedVolatilities() {
 		} else {
 			continue // No usable price data
 		}
+		
+		option.MarketPriceETH = marketPriceETH
 		
 		// Skip if expired or price too low
 		if option.DaysToExpiry <= 0 || marketPriceETH <= 0.001 {
@@ -208,7 +225,8 @@ func (vsa *VolSurfaceAnalyzer) CalculateImpliedVolatilities() {
 		iv := ImpliedVolatility(marketPriceUSD, params)
 		
 		if !math.IsNaN(iv) && iv > 0 {
-			option.IV = iv
+			option.ImpliedVolatility = iv
+			option.IV = iv // Keep both for compatibility
 			
 			// Calculate Greeks using the computed IV
 			params.Volatility = iv
@@ -386,4 +404,85 @@ func (vsa *VolSurfaceAnalyzer) AnalyzeMarkets() {
 	log.Printf("Total Open Interest: %.0f", totalOI)
 	log.Printf("Average IV: %.2f%% (%d valid)", avgIV*100, validIVCount)
 	log.Printf("Current ETH Price: $%.2f", vsa.spotPrice)
+}
+
+// CleanData applies data cleaning filters to the options
+func (vsa *VolSurfaceAnalyzer) CleanData() (cleanedOptions, filteredOptions []OptionData) {
+	log.Println("Cleaning option data...")
+	
+	// Keep a copy of all original options
+	allOptions := make([]OptionData, len(vsa.options))
+	copy(allOptions, vsa.options)
+	
+	// Clean the data
+	vsa.options = vsa.cleaner.CleanOptionData(vsa.options, vsa.spotPrice)
+	vsa.cleaner.PrintDataQualityReport()
+	
+	// Determine which options were filtered out
+	cleanedMap := make(map[string]bool)
+	for _, opt := range vsa.options {
+		cleanedMap[opt.Symbol] = true
+	}
+	
+	filteredOptions = []OptionData{}
+	for _, opt := range allOptions {
+		if !cleanedMap[opt.Symbol] {
+			filteredOptions = append(filteredOptions, opt)
+		}
+	}
+	
+	return vsa.options, filteredOptions
+}
+
+// FitSVISurface fits the SVI model to the cleaned data
+func (vsa *VolSurfaceAnalyzer) FitSVISurface() error {
+	log.Println("Fitting SVI volatility surface...")
+	
+	surface, err := FitVolatilitySurface(vsa.options, vsa.spotPrice, vsa.riskFreeRate)
+	if err != nil {
+		return fmt.Errorf("failed to fit volatility surface: %v", err)
+	}
+	
+	vsa.surface = surface
+	log.Printf("Fitted SVI surface with %d expiry slices", len(surface.Expiries))
+	
+	// Print surface parameters
+	for i, exp := range surface.Expiries {
+		params := surface.Parameters[i]
+		log.Printf("  Expiry %.3f: A=%.4f, B=%.4f, Rho=%.4f, M=%.4f, Sigma=%.4f",
+			exp, params.A, params.B, params.Rho, params.M, params.Sigma)
+	}
+	
+	return nil
+}
+
+// CheckArbitrage runs arbitrage checks on the fitted surface
+func (vsa *VolSurfaceAnalyzer) CheckArbitrage() []ArbitrageViolation {
+	if vsa.surface == nil {
+		log.Println("No fitted surface available for arbitrage checking")
+		return []ArbitrageViolation{}
+	}
+	
+	checker := NewArbitrageChecker(vsa.surface)
+	violations := checker.CheckAllArbitrage()
+	
+	// Filter by severity threshold
+	significantViolations := FilterViolationsBySeverity(violations, 0.01)
+	
+	PrintArbitrageReport(significantViolations)
+	
+	return significantViolations
+}
+
+// GetFittedIV returns the fitted implied volatility for any strike and expiry
+func (vsa *VolSurfaceAnalyzer) GetFittedIV(strike, timeToExpiry float64) float64 {
+	if vsa.surface == nil {
+		return 0
+	}
+	return vsa.surface.GetIV(strike, timeToExpiry)
+}
+
+// GetSurface returns the fitted SVI surface
+func (vsa *VolSurfaceAnalyzer) GetSurface() *SVISurface {
+	return vsa.surface
 }
