@@ -1,6 +1,6 @@
 # Maker Quote Responder Application
 
-This application demonstrates how to connect to the Rysk Finance WebSocket API, listen for Request for Quotes (RFQs) on specific asset streams, and respond with dummy quotes. It showcases a modular Go application structure with persistent connection management and retry logic.
+This application is a production-ready market maker that connects to the Rysk Finance WebSocket API, listens for Request for Quotes (RFQs), responds with competitive quotes using real-time Deribit prices, and automatically hedges positions on Deribit when trades are executed.
 
 ## Prerequisites
 
@@ -8,9 +8,13 @@ This application demonstrates how to connect to the Rysk Finance WebSocket API, 
 2.  **Environment File (`.env`)**: Create a `.env` file in the current directory (`cmd/maker_quote_responder/`) with the following content:
     ```env
     # Private key for signing quotes (without 0x prefix)
-    PRIVATE_KEY=your_private_key_here 
+    PRIVATE_KEY=your_private_key_here
+    
+    # Deribit API credentials (for hedging)
+    DERIBIT_API_KEY=your_deribit_testnet_key
+    DERIBIT_API_SECRET=your_deribit_testnet_secret
     ```
-    Replace `your_private_key_here` with your actual private key.
+    Replace the placeholders with your actual credentials.
 
 ## Building the Application
 
@@ -48,8 +52,9 @@ The `run.sh` script is pre-configured with default values for command-line argum
 *   `MAKER_ADDRESS`: Your Ethereum maker address (e.g., `0x9eAFc0c2b04D96a1C1edAdda8A474a4506752207`).
 *   `WEBSOCKET_URL`: The Rysk Finance WebSocket URL (e.g., `wss://rip-testnet.rysk.finance/maker`).
 *   `RFQ_ASSET_ADDRESSES`: Comma-separated list of RFQ asset addresses (e.g., `0xb67bfa7b488df4f2efa874f4e59242e9130ae61f`). This will be passed to the `--rfq_asset_addresses` flag.
-*   `DUMMY_PRICE`: The dummy price to use for quotes (e.g., `12500000000000000000`).
+*   `DUMMY_PRICE`: The fallback price when Deribit pricing fails (e.g., `12500000000000000000`).
 *   `QUOTE_VALID_DURATION_SECONDS`: Duration in seconds for how long the quote should be valid (e.g., `45`).
+*   `ASSET_MAPPING`: JSON mapping of asset addresses to underlying symbols (e.g., `{"0xb67bfa7b488df4f2efa874f4e59242e9130ae61f":"ETH"}`)
 
 ### Manual Execution (without `run.sh`)
 
@@ -80,3 +85,54 @@ env $(cat .env | grep -v '^#' | xargs) \
 *   `--quote_valid_duration_seconds`: (Optional, default: `30`) The duration in seconds for which the quote is valid.
 
 (Note: The application's `LoadConfig()` function prioritizes command-line flags over environment variables if both are set for the same parameter, except for `PRIVATE_KEY` which is only read from env.)
+
+## Key Features
+
+### 1. Real-time Pricing with Deribit
+The application fetches live option prices from Deribit to generate competitive quotes:
+- Converts RFQ parameters to Deribit instrument format
+- Calculates prices based on order book depth
+- Applies configurable market maker premium/discount
+- Falls back to dummy pricing if Deribit is unavailable
+
+### 2. Automatic Hedging
+When a trade is executed on RyskV12:
+- Receives trade confirmation via WebSocket
+- Automatically places hedge order on Deribit (testnet)
+- Uses fill-or-kill orders with 10% slippage protection
+- Logs all hedge attempts and results
+
+### 3. Asset Mapping
+Configure which assets to quote on using the `ASSET_MAPPING` environment variable:
+```json
+{
+  "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f": "ETH",
+  "0x1234567890123456789012345678901234567890": "BTC"
+}
+```
+
+## Testing
+
+The application includes comprehensive tests:
+- `quoter_test.go`: Unit tests for pricing logic
+- `hedge_test.go`: Tests for hedging functionality
+- `integration_test.go`: End-to-end testing
+
+Run tests with:
+```bash
+go test -v ./...
+```
+
+## Monitoring
+
+The application logs all important events:
+- RFQ receipts and quote responses
+- Deribit pricing attempts and failures
+- Hedge order placements and results
+- Connection status and errors
+
+## Limitations
+
+- Currently supports only call options (puts return an error)
+- Hedging is available only on Deribit testnet
+- Requires manual asset mapping configuration

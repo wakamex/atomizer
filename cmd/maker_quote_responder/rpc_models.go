@@ -58,3 +58,36 @@ type RFQResult struct {
 	ReceivedTS int64  `json:"-"` // Local timestamp when RFQ was processed
 }
 
+// RFQConfirmation represents the structure of an incoming RFQ confirmation message from ryskv12
+// receiving this indicates the trade has been executed on ryskv12 and we need to hedge it on deribit
+type RFQConfirmation struct {
+	ID              string  `json:"id,omitempty"`	
+	Maker           string  `json:"maker" db:"maker,varchar(42)"`
+	AssetAddress    string  `json:"assetAddress" db:"asset_address,varchar(42)"`
+	ChainID         int     `json:"chainId" db:"chain_id,integer"`
+	Expiry          int     `json:"expiry" db:"expiry,integer"`
+	IsPut           bool    `json:"isPut" db:"is_put,boolean"`
+	Nonce           string  `json:"nonce" db:"nonce,varchar(255)"`
+	Price           string  `json:"price" db:"price,numeric(37)"`
+	Quantity        string  `json:"quantity" db:"quantity,numeric(37)"`
+	QuoteNonce      string  `json:"quoteNonce" db:"quote_nonce,varchar(255)"`
+	QuoteValidUntil int     `json:"quoteValidUntil" db:"quote_valid_until,bigint"`
+	QuoteSignature  string  `json:"quoteSignature" db:"quote_signature,varchar(132)"`
+	Strike          string  `json:"strike" db:"strike,numeric(37)"`
+	Taker           string  `json:"taker" db:"taker,varchar(42)"`
+	IsTakerBuy      bool    `json:"isTakerBuy" db:"is_taker_buy,boolean"`
+	Signature       string  `json:"signature" db:"signature,varchar(132)"`
+	ValidUntil      int     `json:"validUntil" db:"valid_until,bigint"`
+	CreatedAt       int     `json:"createdAt,omitempty" db:"created_at,bigint"`
+	APR             float64 `json:"apr,omitempty" db:"apr,decimal(5,2)"`
+}
+
+
+
+// CCXTOrderBook represents the order book structure from CCXT exchange
+type CCXTOrderBook struct {
+	Bids  [][]float64 // Array of [price, amount] pairs
+	Asks  [][]float64 // Array of [price, amount] pairs
+	Index float64     // Index price of the underlying asset
+}
+

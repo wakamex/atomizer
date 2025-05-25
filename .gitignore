@@ -1,4 +1,5 @@
 .env
+*.csv
 .claude
 # Exclude the binary specifically (not the directory)
 cmd/maker_quote_responder/maker_quote_responder

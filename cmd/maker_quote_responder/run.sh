@@ -49,11 +49,12 @@ fi
 # This makes PRIVATE_KEY available to the Go application
 export $(grep -v '^#' .env | grep -v '^$' | xargs)
 
-# Check if PRIVATE_KEY is set after attempting to load .env
-if [ -z "$PRIVATE_KEY" ]; then
-    echo "Error: PRIVATE_KEY is not set in your .env file or as an environment variable."
-    exit 1
-fi
+# Print details before running
+echo "Maker Address: $MAKER_ADDRESS"
+echo "WebSocket URL: $WEBSOCKET_URL"
+echo "RFQ Asset Addresses: $RFQ_ASSET_ADDRESSES"
+echo "Dummy Price: $DUMMY_PRICE"
+echo "Quote Valid Duration Seconds: $QUOTE_VALID_DURATION_SECONDS"
 
 echo "Starting Maker Quote Responder..."
 

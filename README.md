@@ -1,7 +1,14 @@
 # Atomizer Project
 
-This repository contains the Atomizer project and its related examples.
+This repository contains the Atomizer project, a comprehensive market making system for Rysk Finance with automated hedging capabilities.
 It utilizes the `ryskV12-cli` as a submodule located in the `sdk` directory.
+
+## Features
+
+- **Automated Market Making**: Connects to Rysk Finance WebSocket API to receive and respond to RFQs
+- **Deribit Hedging**: Automatically hedges positions on Deribit when trades are executed
+- **Real-time Pricing**: Fetches live option prices from Deribit for competitive quoting
+- **Market Analysis Tools**: Command-line utilities for market inventory, RFQ testing, and performance analysis
 
 ## Progress
 
@@ -14,6 +21,8 @@ sdk actions:
 - [ ] transfer
 combo:
 - [x] maker_quote_response.go (connect and quote)
+- [x] hedging integration with Deribit
+- [x] market analysis tools (inventory, markets, send_quote)
 
 
 ## Prerequisites
@@ -34,19 +43,46 @@ combo:
    git submodule update --init --recursive
    ```
 
-## Maker Quote Responder Application
+## Applications
 
-The primary application in this repository is the `maker_quote_responder`, located in the `cmd/maker_quote_responder/` directory. This application connects to the Rysk Finance API, listens for RFQs, and responds with quotes.
+### 1. Maker Quote Responder (`cmd/maker_quote_responder/`)
 
-For detailed instructions on how to build, configure, and run the `maker_quote_responder`, please refer to its dedicated README file:
+The primary application that connects to Rysk Finance API, listens for RFQs, responds with quotes, and automatically hedges on Deribit.
 
-[**Maker Quote Responder Instructions (`cmd/maker_quote_responder/README.md`)**](./cmd/maker_quote_responder/README.md)
+[**Detailed Instructions**](./cmd/maker_quote_responder/README.md)
 
-This guide covers:
-- Prerequisites
-- Building the executable
-- Setting up the `.env` file
-- Running the application using the `run.sh` script
+Key features:
+- Real-time quote generation using Deribit prices
+- Automatic hedging when trades are executed
+- Configurable price premiums and slippage protection
+- Comprehensive error handling and fallback mechanisms
+
+### 2. Market Analysis Tools
+
+#### Inventory Command (`cmd/inventory/`)
+Displays current market inventory with bid/ask spreads, delta, and APY.
+
+```bash
+cd cmd/inventory && ./inventory.sh
+```
+
+#### Markets Command (`cmd/markets/`)
+Fetches and saves market asset data from the Rysk API.
+
+```bash
+cd cmd/markets && ./markets.sh
+```
+
+[**Markets Tool Documentation**](./cmd/markets/README.md)
+
+#### Send Quote Tool (`cmd/send_quote/`)
+Sends RFQs to multiple markets simultaneously and measures response times.
+
+```bash
+cd cmd/send_quote && ./send_rfq.sh
+```
+
+[**Send Quote Documentation**](./cmd/send_quote/README.md)
 
 ## Submodule
 

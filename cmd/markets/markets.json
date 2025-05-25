@@ -1,0 +1,244 @@
+{
+  "10143": [
+    {
+      "active": true,
+      "address": "0xe1d2439b75fb9746e7bc6cb777ae10aa7f7ef9c5",
+      "chainId": 10143,
+      "decimals": 18,
+      "maxTradeSize": "1000000000000000000000",
+      "minTradeSize": "10000000000000000000",
+      "multipliers": [],
+      "price": "2148952038680000000",
+      "symbol": "sMON",
+      "underlying": "MON",
+      "underlyingAssetAddress": "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701"
+    },
+    {
+      "active": true,
+      "address": "0xb2f82d0f38dc453d596ad40a37799446cc89274a",
+      "chainId": 10143,
+      "decimals": 18,
+      "maxTradeSize": "1000000000000000000000",
+      "minTradeSize": "10000000000000000000",
+      "multipliers": [],
+      "price": "2148952038680000000",
+      "symbol": "aprMON",
+      "underlying": "MON",
+      "underlyingAssetAddress": "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701"
+    },
+    {
+      "active": true,
+      "address": "0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37",
+      "chainId": 10143,
+      "decimals": 18,
+      "maxTradeSize": "10000000000000000000",
+      "minTradeSize": "1000000000000000000",
+      "multipliers": [],
+      "price": "2514120847112500000000",
+      "symbol": "WETH",
+      "underlying": "ETH",
+      "underlyingAssetAddress": "0xb5a30b0fdc5ea94a52fdc42e3e9760cb8449fb37"
+    },
+    {
+      "active": true,
+      "address": "0x3a98250f98dd388c211206983453837c8365bdc1",
+      "chainId": 10143,
+      "decimals": 18,
+      "maxTradeSize": "1000000000000000000000",
+      "minTradeSize": "10000000000000000000",
+      "multipliers": [],
+      "price": "2148952038680000000",
+      "symbol": "shMON",
+      "underlying": "MON",
+      "underlyingAssetAddress": "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701"
+    },
+    {
+      "active": true,
+      "address": "0xaeef2f6b429cb59c9b2d7bb2141ada993e8571c3",
+      "chainId": 10143,
+      "decimals": 18,
+      "maxTradeSize": "1000000000000000000000",
+      "minTradeSize": "10000000000000000000",
+      "multipliers": [],
+      "price": "2148952038680000000",
+      "symbol": "gMON",
+      "underlying": "MON",
+      "underlyingAssetAddress": "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701"
+    },
+    {
+      "active": true,
+      "address": "0xcf5a6076cfa32686c0df13abada2b40dec133f1d",
+      "chainId": 10143,
+      "decimals": 8,
+      "maxTradeSize": "1000000000000000000",
+      "minTradeSize": "100000000000000000",
+      "multipliers": [],
+      "price": "107357857075750012000000",
+      "symbol": "WBTC",
+      "underlying": "BTC",
+      "underlyingAssetAddress": "0xcf5a6076cfa32686c0df13abada2b40dec133f1d"
+    },
+    {
+      "active": true,
+      "address": "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701",
+      "chainId": 10143,
+      "decimals": 18,
+      "maxTradeSize": "1000000000000000000000",
+      "minTradeSize": "10000000000000000000",
+      "multipliers": [],
+      "price": "2148952038680000000",
+      "symbol": "WMON",
+      "underlying": "MON",
+      "underlyingAssetAddress": "0x760afe86e5de5fa0ee542fc7b7b713e1c5425701"
+    }
+  ],
+  "84532": [
+    {
+      "active": true,
+      "address": "0x8f3df7286d1fc7ce966d78d6d3467030b36f6636",
+      "chainId": 84532,
+      "decimals": 18,
+      "maxTradeSize": "10000000000000000000",
+      "minTradeSize": "1000000000000000000",
+      "multipliers": [],
+      "price": "2514120847112500000000",
+      "symbol": "weETH",
+      "underlying": "ETH",
+      "underlyingAssetAddress": "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f"
+    },
+    {
+      "active": true,
+      "address": "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f",
+      "chainId": 84532,
+      "decimals": 18,
+      "maxTradeSize": "10000000000000000000",
+      "minTradeSize": "1000000000000000000",
+      "multipliers": [],
+      "price": "2514120847112500000000",
+      "symbol": "WETH",
+      "underlying": "ETH",
+      "underlyingAssetAddress": "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f"
+    },
+    {
+      "active": true,
+      "address": "0x1d0f07fa20069f5b8d2c430eefd2f3473d7bf5f3",
+      "chainId": 84532,
+      "decimals": 18,
+      "maxTradeSize": "10000000000000000000",
+      "minTradeSize": "1000000000000000000",
+      "multipliers": [],
+      "price": "2514120847112500000000",
+      "symbol": "WSTETH",
+      "underlying": "ETH",
+      "underlyingAssetAddress": "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f"
+    },
+    {
+      "active": true,
+      "address": "0xd49e59ba17a457a0e3b48bbdec6d4c271e018747",
+      "chainId": 84532,
+      "decimals": 18,
+      "maxTradeSize": "10000000000000000000",
+      "minTradeSize": "1000000000000000000",
+      "multipliers": [
+        {
+          "name": "COOK Points",
+          "value": "4x"
+        }
+      ],
+      "price": "2514120847112500000000",
+      "symbol": "METH",
+      "underlying": "ETH",
+      "underlyingAssetAddress": "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f"
+    },
+    {
+      "active": true,
+      "address": "0x0cb970511c6c3491dc36f1b7774743da3fc4335f",
+      "chainId": 84532,
+      "decimals": 8,
+      "maxTradeSize": "1000000000000000000",
+      "minTradeSize": "100000000000000000",
+      "multipliers": [],
+      "price": "107357857075750012000000",
+      "symbol": "WBTC",
+      "underlying": "BTC",
+      "underlyingAssetAddress": "0x0cb970511c6c3491dc36f1b7774743da3fc4335f"
+    },
+    {
+      "active": true,
+      "address": "0xca0d7b1b0330417310138ae4c9088eb3498dc9f9",
+      "chainId": 84532,
+      "decimals": 8,
+      "maxTradeSize": "1000000000000000000",
+      "minTradeSize": "100000000000000000",
+      "multipliers": [
+        {
+          "name": "Lombard Points",
+          "value": "4x"
+        },
+        {
+          "name": "Babylon Points",
+          "value": "8x"
+        }
+      ],
+      "price": "107357857075750012000000",
+      "symbol": "LBTC",
+      "underlying": "BTC",
+      "underlyingAssetAddress": "0x0cb970511c6c3491dc36f1b7774743da3fc4335f"
+    },
+    {
+      "active": true,
+      "address": "0xeee7be6ede123ccc1c389a64fe2e94d5410345e4",
+      "chainId": 84532,
+      "decimals": 8,
+      "maxTradeSize": "1000000000000000000",
+      "minTradeSize": "100000000000000000",
+      "multipliers": [
+        {
+          "name": "iBTC Points",
+          "value": "4x"
+        }
+      ],
+      "price": "107357857075750012000000",
+      "symbol": "iBTC",
+      "underlying": "BTC",
+      "underlyingAssetAddress": "0x0cb970511c6c3491dc36f1b7774743da3fc4335f"
+    },
+    {
+      "active": true,
+      "address": "0x6a4a5c4e551953d3c80c4fbb51ecced1143f4c55",
+      "chainId": 84532,
+      "decimals": 18,
+      "maxTradeSize": "1000000000000000000",
+      "minTradeSize": "100000000000000000",
+      "multipliers": [
+        {
+          "name": "Babylon Points",
+          "value": "4x"
+        },
+        {
+          "name": "Solv XP",
+          "value": "4x"
+        }
+      ],
+      "price": "107357857075750012000000",
+      "symbol": "SolvBTC",
+      "underlying": "BTC",
+      "underlyingAssetAddress": "0x0cb970511c6c3491dc36f1b7774743da3fc4335f"
+    }
+  ],
+  "998": [
+    {
+      "active": true,
+      "address": "0x5555555555555555555555555555555555555555",
+      "chainId": 998,
+      "decimals": 18,
+      "maxTradeSize": "1000000000000000000000",
+      "minTradeSize": "10000000000000000000",
+      "multipliers": [],
+      "price": "37938974013505000000",
+      "symbol": "WHYPE",
+      "underlying": "HYPE",
+      "underlyingAssetAddress": "0x5555555555555555555555555555555555555555"
+    }
+  ]
+}
