@@ -167,6 +167,26 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
                     <h2>Individual IV Points</h2>
                     <div id="scatterPoints"></div>
                 </div>
+                
+                <div class="chart-container">
+                    <h2>Put-Call IV Spread</h2>
+                    <div id="putCallSpread"></div>
+                </div>
+                
+                <div class="chart-container">
+                    <h2>Volatility Skew (25D Risk Reversal)</h2>
+                    <div id="volSkew"></div>
+                </div>
+                
+                <div class="chart-container full-width">
+                    <h2>Strike vs Moneyness Grid</h2>
+                    <div id="moneynessGrid"></div>
+                </div>
+                
+                <div class="chart-container">
+                    <h2>IV Distribution Histogram</h2>
+                    <div id="ivHistogram"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -190,6 +210,10 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
                 createVolStrikeChart(data);
                 createTermStructure(data);
                 createScatterPoints(data);
+                createPutCallSpread(data);
+                createVolSkew(data);
+                createMoneynessGrid(data);
+                createIVHistogram(data);
             } catch (error) {
                 console.error('Error loading data:', error);
                 document.getElementById('loading').innerHTML = '<h2>Error loading data: ' + error.message + '</h2>';
@@ -334,25 +358,49 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
             const points = data.points;
             const expiryGroups = {};
             
+            // Group by expiry and option type
             points.forEach(p => {
                 const expiry = p.timeToExpiry.toFixed(3);
-                if (!expiryGroups[expiry]) expiryGroups[expiry] = [];
-                expiryGroups[expiry].push(p);
+                const key = expiry + '_' + p.optionType;
+                if (!expiryGroups[key]) expiryGroups[key] = [];
+                expiryGroups[key].push(p);
             });
             
-            const traces = Object.entries(expiryGroups).map(([expiry, pts]) => ({
-                x: pts.map(p => p.strike),
-                y: pts.map(p => p.iv * 100),
-                mode: 'markers+lines',
-                name: expiry + 'Y',
-                type: 'scatter'
-            }));
+            // Sort and create traces for calls and puts separately
+            const traces = [];
+            const sortedKeys = Object.keys(expiryGroups).sort();
+            
+            sortedKeys.forEach(key => {
+                const [expiry, optType] = key.split('_');
+                const pts = expiryGroups[key].sort((a, b) => a.strike - b.strike);
+                
+                traces.push({
+                    x: pts.map(p => p.strike),
+                    y: pts.map(p => p.iv * 100),
+                    mode: 'markers+lines',
+                    name: expiry + 'Y ' + (optType === 'C' ? 'Calls' : 'Puts'),
+                    type: 'scatter',
+                    line: {
+                        dash: optType === 'P' ? 'dot' : 'solid',
+                        width: 2
+                    },
+                    marker: {
+                        symbol: optType === 'C' ? 'circle' : 'square',
+                        size: 6
+                    }
+                });
+            });
             
             const layout = {
                 xaxis: { title: 'Strike Price ($)' },
                 yaxis: { title: 'Implied Volatility (%)' },
                 showlegend: true,
-                margin: { l: 50, r: 50, b: 50, t: 50 }
+                legend: { 
+                    x: 1.05,
+                    y: 1,
+                    xanchor: 'left'
+                },
+                margin: { l: 50, r: 150, b: 50, t: 50 }
             };
             
             Plotly.newPlot('volStrike', traces, layout);
@@ -417,6 +465,239 @@ func (ws *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
             };
             
             Plotly.newPlot('scatterPoints', traces, layout);
+        }
+        
+        function createPutCallSpread(data) {
+            const points = data.points;
+            const expiryGroups = {};
+            
+            // Group by expiry and calculate put-call spreads
+            points.forEach(p => {
+                const expiry = p.timeToExpiry.toFixed(3);
+                if (!expiryGroups[expiry]) {
+                    expiryGroups[expiry] = { calls: {}, puts: {} };
+                }
+                
+                const nearestStrike = Math.round(p.strike / 50) * 50; // Round to nearest 50
+                if (p.optionType === 'C') {
+                    expiryGroups[expiry].calls[nearestStrike] = p.iv;
+                } else {
+                    expiryGroups[expiry].puts[nearestStrike] = p.iv;
+                }
+            });
+            
+            // Calculate spreads
+            const traces = [];
+            Object.entries(expiryGroups).forEach(([expiry, data]) => {
+                const strikes = [];
+                const spreads = [];
+                
+                Object.keys(data.calls).forEach(strike => {
+                    if (data.puts[strike]) {
+                        strikes.push(parseFloat(strike));
+                        spreads.push((data.puts[strike] - data.calls[strike]) * 100);
+                    }
+                });
+                
+                if (strikes.length > 0) {
+                    traces.push({
+                        x: strikes,
+                        y: spreads,
+                        mode: 'lines+markers',
+                        name: expiry + 'Y',
+                        type: 'scatter'
+                    });
+                }
+            });
+            
+            const layout = {
+                xaxis: { title: 'Strike Price ($)' },
+                yaxis: { title: 'Put-Call IV Spread (%)' },
+                showlegend: true,
+                margin: { l: 50, r: 50, b: 50, t: 50 },
+                shapes: [{
+                    type: 'line',
+                    x0: 0,
+                    x1: 1,
+                    xref: 'paper',
+                    y0: 0,
+                    y1: 0,
+                    line: { color: 'gray', width: 1, dash: 'dot' }
+                }]
+            };
+            
+            Plotly.newPlot('putCallSpread', traces, layout);
+        }
+        
+        function createVolSkew(data) {
+            const points = data.points;
+            const expiryGroups = {};
+            
+            // Group by expiry
+            points.forEach(p => {
+                const expiry = p.timeToExpiry.toFixed(3);
+                if (!expiryGroups[expiry]) expiryGroups[expiry] = [];
+                expiryGroups[expiry].push(p);
+            });
+            
+            // Calculate 25D skew for each expiry
+            const traces = [];
+            Object.entries(expiryGroups).forEach(([expiry, pts]) => {
+                // Find ATM
+                const spotPrice = data.spotPrice;
+                const atmStrike = spotPrice;
+                
+                // Approximate 25D strikes (0.25 delta ~ 0.8 and 1.25 moneyness)
+                const putStrike = atmStrike * 0.8;
+                const callStrike = atmStrike * 1.25;
+                
+                // Find closest options
+                let put25D = null;
+                let call25D = null;
+                let minPutDist = Infinity;
+                let minCallDist = Infinity;
+                
+                pts.forEach(p => {
+                    if (p.optionType === 'P') {
+                        const dist = Math.abs(p.strike - putStrike);
+                        if (dist < minPutDist) {
+                            minPutDist = dist;
+                            put25D = p.iv;
+                        }
+                    } else {
+                        const dist = Math.abs(p.strike - callStrike);
+                        if (dist < minCallDist) {
+                            minCallDist = dist;
+                            call25D = p.iv;
+                        }
+                    }
+                });
+                
+                if (put25D && call25D) {
+                    traces.push({
+                        x: [parseFloat(expiry)],
+                        y: [(put25D - call25D) * 100],
+                        mode: 'markers',
+                        name: '25D Risk Reversal',
+                        type: 'scatter',
+                        marker: { size: 10 }
+                    });
+                }
+            });
+            
+            // Combine all points into one trace
+            const allX = [];
+            const allY = [];
+            traces.forEach(t => {
+                allX.push(...t.x);
+                allY.push(...t.y);
+            });
+            
+            const layout = {
+                xaxis: { title: 'Time to Expiry (years)' },
+                yaxis: { title: '25D Risk Reversal (Put IV - Call IV) %' },
+                showlegend: false,
+                margin: { l: 50, r: 50, b: 50, t: 50 }
+            };
+            
+            Plotly.newPlot('volSkew', [{
+                x: allX,
+                y: allY,
+                mode: 'lines+markers',
+                type: 'scatter',
+                line: { width: 2 },
+                marker: { size: 8 }
+            }], layout);
+        }
+        
+        function createMoneynessGrid(data) {
+            const points = data.points;
+            const spotPrice = data.spotPrice;
+            
+            // Create moneyness buckets
+            const buckets = {};
+            const bucketSize = 0.05; // 5% buckets
+            
+            points.forEach(p => {
+                const bucket = Math.floor(p.moneyness / bucketSize) * bucketSize;
+                const expiryBucket = Math.floor(p.timeToExpiry * 12) / 12; // Monthly buckets
+                const key = bucket.toFixed(2) + '_' + expiryBucket.toFixed(3);
+                
+                if (!buckets[key]) {
+                    buckets[key] = { moneyness: bucket, expiry: expiryBucket, ivs: [] };
+                }
+                buckets[key].ivs.push(p.iv);
+            });
+            
+            // Calculate average IV for each bucket
+            const x = [];
+            const y = [];
+            const z = [];
+            const text = [];
+            
+            Object.values(buckets).forEach(b => {
+                if (b.ivs.length > 0) {
+                    const avgIV = b.ivs.reduce((a, v) => a + v, 0) / b.ivs.length;
+                    x.push(b.moneyness);
+                    y.push(b.expiry);
+                    z.push(avgIV * 100);
+                    text.push('Moneyness: ' + b.moneyness.toFixed(2) + '<br>Expiry: ' + b.expiry.toFixed(3) + 'Y<br>Avg IV: ' + (avgIV * 100).toFixed(1) + '%<br>Points: ' + b.ivs.length);
+                }
+            });
+            
+            const trace = {
+                x: x,
+                y: y,
+                z: z,
+                type: 'heatmap',
+                colorscale: 'Viridis',
+                text: text,
+                hovertemplate: '%{text}<extra></extra>',
+                colorbar: { title: 'IV (%)' }
+            };
+            
+            const layout = {
+                xaxis: { title: 'Moneyness (Strike/Spot)' },
+                yaxis: { title: 'Time to Expiry (years)' },
+                margin: { l: 60, r: 50, b: 50, t: 50 }
+            };
+            
+            Plotly.newPlot('moneynessGrid', [trace], layout);
+        }
+        
+        function createIVHistogram(data) {
+            const points = data.points;
+            const calls = points.filter(p => p.optionType === 'C').map(p => p.iv * 100);
+            const puts = points.filter(p => p.optionType === 'P').map(p => p.iv * 100);
+            
+            const traces = [
+                {
+                    x: calls,
+                    type: 'histogram',
+                    name: 'Calls',
+                    opacity: 0.6,
+                    marker: { color: 'green' },
+                    nbinsx: 20
+                },
+                {
+                    x: puts,
+                    type: 'histogram',
+                    name: 'Puts',
+                    opacity: 0.6,
+                    marker: { color: 'red' },
+                    nbinsx: 20
+                }
+            ];
+            
+            const layout = {
+                barmode: 'overlay',
+                xaxis: { title: 'Implied Volatility (%)' },
+                yaxis: { title: 'Count' },
+                showlegend: true,
+                margin: { l: 50, r: 50, b: 50, t: 50 }
+            };
+            
+            Plotly.newPlot('ivHistogram', traces, layout);
         }
         
         // Load data when page loads
