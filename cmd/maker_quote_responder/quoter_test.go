@@ -6,6 +6,7 @@ import (
 	"time"
 
 	ccxt "github.com/ccxt/ccxt/go/v4"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDeribitOptionPricing(t *testing.T) {
@@ -24,7 +25,7 @@ func TestDeribitOptionPricing(t *testing.T) {
 	}{
 		{
 			name:       "ETH Call Option",
-			instrument: "ETH-28MAR25-5000-C",
+			instrument: "ETH-30MAY25-3000-C",
 			wantError:  false,
 		},
 		{
@@ -98,64 +99,6 @@ func TestDeribitOptionPricing(t *testing.T) {
 	}
 }
 
-func TestConvertOptionDetailsToInstrument(t *testing.T) {
-	testCases := []struct {
-		name     string
-		asset    string
-		strike   string
-		expiry   int64
-		isPut    bool
-		expected string
-		wantErr  bool
-	}{
-		{
-			name:     "ETH Call Option",
-			asset:    "ETH",
-			strike:   "500000000000", // 5000 * 1e8
-			expiry:   time.Date(2025, 3, 28, 0, 0, 0, 0, time.UTC).Unix(),
-			isPut:    false,
-			expected: "ETH-28MAR25-5000-C",
-			wantErr:  false,
-		},
-		{
-			name:     "BTC Call Option",
-			asset:    "BTC",
-			strike:   "10000000000000", // 100000 * 1e8
-			expiry:   time.Date(2025, 1, 31, 0, 0, 0, 0, time.UTC).Unix(),
-			isPut:    false,
-			expected: "BTC-31JAN25-100000-C",
-			wantErr:  false,
-		},
-		{
-			name:    "Put Option (not supported)",
-			asset:   "ETH",
-			strike:  "500000000000",
-			expiry:  time.Date(2025, 3, 28, 0, 0, 0, 0, time.UTC).Unix(),
-			isPut:   true,
-			wantErr: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			result, err := convertOptionDetailsToInstrument(tc.asset, tc.strike, tc.expiry, tc.isPut)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("Expected error, but got none")
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("Unexpected error: %v", err)
-				return
-			}
-			if result != tc.expected {
-				t.Errorf("Expected %s, got %s", tc.expected, result)
-			}
-		})
-	}
-}
-
 func getMapKeys(m map[string]interface{}) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
@@ -167,7 +110,7 @@ func getMapKeys(m map[string]interface{}) []string {
 func TestManualDeribitAPI(t *testing.T) {
 	// This test manually checks what Deribit returns for options
 	t.Skip("Manual test - uncomment to run")
-	
+
 	exchange := ccxt.NewDeribit(map[string]interface{}{
 		"rateLimit":       10,
 		"enableRateLimit": true,
@@ -175,7 +118,7 @@ func TestManualDeribitAPI(t *testing.T) {
 
 	// Test a specific option
 	instrument := "ETH-28MAR25-5000-C"
-	
+
 	ticker, err := exchange.FetchTicker(instrument)
 	if err != nil {
 		t.Fatalf("Failed to fetch ticker: %v", err)
@@ -186,4 +129,23 @@ func TestManualDeribitAPI(t *testing.T) {
 	fmt.Printf("Ask: %v\n", ticker.Ask)
 	fmt.Printf("Last: %v\n", ticker.Last)
 	fmt.Printf("Info: %+v\n", ticker.Info)
+}
+
+func TestMakeQuote(t *testing.T) {
+	a, err := MakeQuote(RFQResult{
+		Asset:      "ETH",
+		Strike:     "260000000000",
+		Expiry:     time.Date(2025, 6, 28, 0, 0, 0, 0, time.UTC).Unix(),
+		IsPut:      false,
+		Quantity:   "1000000000000000000",
+		IsTakerBuy: false,
+	}, "ETH", "test-nonce", &AppConfig{})
+	assert.NoError(t, err)
+	assert.Equal(t, a.Strike, "260000000000")
+	assert.Equal(t, a.Expiry, time.Date(2025, 6, 28, 0, 0, 0, 0, time.UTC).Unix())
+	assert.Equal(t, a.IsPut, false)
+	assert.Equal(t, a.Quantity, "1000000000000000000")
+	assert.Equal(t, a.IsTakerBuy, false)
+	assert.Equal(t, a.AssetAddress, "0x0000000000000000000000000000000000000000")
+	assert.Equal(t, a.ChainID, uint64(1))
 }

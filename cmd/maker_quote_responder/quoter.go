@@ -6,10 +6,11 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/wakamex/rysk-v12-cli/ryskcore"
 	ccxt "github.com/ccxt/ccxt/go/v4"
+	"github.com/wakamex/rysk-v12-cli/ryskcore"
 )
 
 // the purpose of this module is to take in a given option request confirmation, return a quote for that option
@@ -47,7 +48,6 @@ func MakeQuote(req RFQResult, underlying string, originalRfqID string, cfg *AppC
 		log.Printf("[Quote %s] Error creating quote message for signing: %v", originalRfqID, err)
 		return ryskcore.Quote{}, err
 	}
-
 
 	signature, err := ryskcore.Sign(msgHash, privateKey)
 	if err != nil {
@@ -89,13 +89,13 @@ func getOrderBook(req RFQResult, asset string) (CCXTOrderBook, error) {
 
 	// Initialize CCXT exchange
 	exchange := ccxt.NewDeribit(map[string]interface{}{
-		"rateLimit": 10,
+		"rateLimit":       10,
 		"enableRateLimit": true,
 	})
 
 	// CCXT requires the symbol format with prefix for options
 	ccxtSymbol := fmt.Sprintf("%s/USD:%s", asset, instrumentName)
-	
+
 	// Fetch order book
 	orderBook, err := exchange.FetchOrderBook(ccxtSymbol)
 	if err != nil {
@@ -118,16 +118,16 @@ func getOrderBook(req RFQResult, asset string) (CCXTOrderBook, error) {
 			}
 		}
 	}
-	
+
 	// If we couldn't get index price from option ticker, try to fetch spot/futures
 	if indexPrice == 0.0 {
 		// Try different instrument names that Deribit might support
 		possibleIndexInstruments := []string{
-			asset + "-PERPETUAL",      // This is the correct format for Deribit
+			asset + "-PERPETUAL", // This is the correct format for Deribit
 			asset + "_USDC-PERPETUAL",
 			asset + "_USD-PERPETUAL",
 		}
-		
+
 		for _, instrument := range possibleIndexInstruments {
 			indexTicker, err := exchange.FetchTicker(instrument)
 			if err == nil && indexTicker.Last != nil {
@@ -211,19 +211,15 @@ func convertOptionDetailsToInstrument(
 		return "", fmt.Errorf("invalid strike")
 	}
 	strike = strikeBigInt.Div(strikeBigInt, new(big.Int).SetUint64(1e8)).String()
-
 	// convert the expiry from a timestamp seconds into a deribit compatible date time
-	// Deribit uses YYMMDD format
-	deribitExpiry := time.Unix(expiry, 0).Format("060102")
+	deribitExpiry := strings.ToUpper(time.Unix(expiry, 0).Format("2Jan06"))
 	// convert isPut to "C" or "P"
-	optionType := "C"
+	put := "C"
 	if isPut {
-		optionType = "P"
+		put = "P"
 		return "", fmt.Errorf("puts not supported")
 	}
-
-	// construct the instrument name in Deribit format: ASSET-YYMMDD-STRIKE-C/P
-	// e.g., ETH-250530-3000-C for an ETH call option expiring May 30, 2025
-	instrumentName := fmt.Sprintf("%s-%s-%s-%s", asset, deribitExpiry, strike, optionType)
+	// construct the instrument
+	instrumentName := asset + "-" + deribitExpiry + "-" + strike + "-" + put
 	return instrumentName, nil
 }

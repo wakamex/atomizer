@@ -17,6 +17,8 @@ type AppConfig struct {
 	RFQAssetAddressesCSV      string
 	MakerAddress              string
 	PrivateKey                string
+	DeribitApiKey             string
+	DeribitApiSecret          string
 	DummyPrice                string
 	QuoteValidDurationSeconds int64
 	AssetMapping              map[string]string // Maps asset addresses to underlying symbols (ETH, BTC, SOL)
@@ -35,7 +37,9 @@ func LoadConfig() *AppConfig {
 
 	cfg.MakerAddress = os.Getenv("MAKER_ADDRESS")
 	cfg.PrivateKey = os.Getenv("PRIVATE_KEY")
-
+	cfg.DeribitApiKey = os.Getenv("DERIBIT_API_KEY")
+	cfg.DeribitApiSecret = os.Getenv("DERIBIT_API_SECRET")
+	
 	if cfg.RFQAssetAddressesCSV == "" {
 		log.Fatal("Error: --rfq_asset_addresses is required.")
 	}
@@ -44,6 +48,12 @@ func LoadConfig() *AppConfig {
 	}
 	if cfg.PrivateKey == "" {
 		log.Fatal("Error: PRIVATE_KEY environment variable is not set or empty.")
+	}
+	if cfg.DeribitApiKey == "" {
+		log.Fatal("Error: DERIBIT_API_KEY environment variable is not set or empty.")
+	}
+	if cfg.DeribitApiSecret == "" {
+		log.Fatal("Error: DERIBIT_API_SECRET environment variable is not set or empty.")
 	}
 	
 	// Validate private key format
