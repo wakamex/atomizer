@@ -6,10 +6,8 @@ import (
 	"math"
 	"math/big"
 	"strconv"
-	"strings"
 	"time"
 
-	ccxt "github.com/ccxt/ccxt/go/v4"
 	"github.com/wakamex/rysk-v12-cli/ryskcore"
 )
 
@@ -19,8 +17,8 @@ import (
 // / the underlying must be a string that is either "ETH", "BTC" or "SOL" (essentially the primary asset, not the LST)
 // / the expiry must be provided in the format "DDMMMYY" (e.g. "31JAN25") (note that on deribit if the first number is 0, it will cut it e.g. 6JAN25)
 // / quantity in normal numbers
-func MakeQuote(req RFQResult, underlying string, originalRfqID string, cfg *AppConfig) (ryskcore.Quote, error) {
-	quote, _, err := getDeribitQuote(req, underlying)
+func MakeQuote(req RFQResult, underlying string, originalRfqID string, cfg *AppConfig, exchange Exchange) (ryskcore.Quote, error) {
+	quote, _, err := getExchangeQuote(req, underlying, exchange)
 	if err != nil {
 		return ryskcore.Quote{}, err
 	}
@@ -58,9 +56,9 @@ func MakeQuote(req RFQResult, underlying string, originalRfqID string, cfg *AppC
 	return finalQuote, nil
 }
 
-func getDeribitQuote(req RFQResult, asset string) (string, float64, error) {
-	// get the order book using CCXT
-	book, err := getOrderBook(req, asset)
+func getExchangeQuote(req RFQResult, asset string, exchange Exchange) (string, float64, error) {
+	// get the order book using the exchange interface
+	book, err := exchange.GetOrderBook(req, asset)
 	if err != nil {
 		return "", 0.0, err
 	}
@@ -80,72 +78,8 @@ func getDeribitQuote(req RFQResult, asset string) (string, float64, error) {
 	return fmt.Sprintf("%d", int(dollarPrice)), apr, nil
 }
 
-func getOrderBook(req RFQResult, asset string) (CCXTOrderBook, error) {
-	// Convert option details to instrument name
-	instrumentName, err := convertOptionDetailsToInstrument(asset, req.Strike, req.Expiry, req.IsPut)
-	if err != nil {
-		return CCXTOrderBook{}, err
-	}
-
-	// Initialize CCXT exchange
-	exchange := ccxt.NewDeribit(map[string]interface{}{
-		"rateLimit":       10,
-		"enableRateLimit": true,
-	})
-
-	// CCXT requires the symbol format with prefix for options
-	ccxtSymbol := fmt.Sprintf("%s/USD:%s", asset, instrumentName)
-
-	// Fetch order book
-	orderBook, err := exchange.FetchOrderBook(ccxtSymbol)
-	if err != nil {
-		return CCXTOrderBook{}, fmt.Errorf("failed to fetch order book: %v", err)
-	}
-
-	// Fetch ticker for the option instrument to get its price
-	optionTicker, err := exchange.FetchTicker(ccxtSymbol)
-	if err != nil {
-		return CCXTOrderBook{}, fmt.Errorf("failed to fetch option ticker: %v", err)
-	}
-
-	// Get the underlying index price from the option ticker
-	indexPrice := 0.0
-	if optionTicker.Info != nil {
-		// Deribit option tickers include underlying price in the info
-		if underlyingPrice, exists := optionTicker.Info["underlying_price"]; exists {
-			if price, ok := underlyingPrice.(float64); ok {
-				indexPrice = price
-			}
-		}
-	}
-
-	// If we couldn't get index price from option ticker, try to fetch spot/futures
-	if indexPrice == 0.0 {
-		// Try different instrument names that Deribit might support
-		possibleIndexInstruments := []string{
-			asset + "-PERPETUAL", // This is the correct format for Deribit
-			asset + "_USDC-PERPETUAL",
-			asset + "_USD-PERPETUAL",
-		}
-
-		for _, instrument := range possibleIndexInstruments {
-			indexTicker, err := exchange.FetchTicker(instrument)
-			if err == nil && indexTicker.Last != nil {
-				indexPrice = *indexTicker.Last
-				break
-			}
-		}
-	}
-
-	// Convert order book to our structure
-	book := CCXTOrderBook{
-		Bids:  orderBook.Bids,
-		Asks:  orderBook.Asks,
-		Index: indexPrice,
-	}
-
-	return book, nil
-}
+// getOrderBook is now deprecated - functionality moved to exchange implementations
+// Use exchange.GetOrderBook() instead
 
 func getPriceInclSlippage(req RFQResult, book CCXTOrderBook) (float64, error) {
 	amountBigInt, _ := new(big.Int).SetString(req.Quantity, 10)
@@ -199,27 +133,5 @@ func CalculateAPR(nominator *big.Float, denominator *big.Float, maturity int64) 
 	return timeToExpiryDays, a
 }
 
-func convertOptionDetailsToInstrument(
-	asset string,
-	strike string,
-	expiry int64,
-	isPut bool,
-) (string, error) {
-	// convert the strike from a big.Int string to a normal number
-	strikeBigInt, ok := new(big.Int).SetString(strike, 10)
-	if !ok {
-		return "", fmt.Errorf("invalid strike")
-	}
-	strike = strikeBigInt.Div(strikeBigInt, new(big.Int).SetUint64(1e8)).String()
-	// convert the expiry from a timestamp seconds into a deribit compatible date time
-	deribitExpiry := strings.ToUpper(time.Unix(expiry, 0).Format("2Jan06"))
-	// convert isPut to "C" or "P"
-	put := "C"
-	if isPut {
-		put = "P"
-		return "", fmt.Errorf("puts not supported")
-	}
-	// construct the instrument
-	instrumentName := asset + "-" + deribitExpiry + "-" + strike + "-" + put
-	return instrumentName, nil
-}
+// convertOptionDetailsToInstrument is now deprecated - functionality moved to exchange implementations
+// Use exchange.ConvertToInstrument() instead

@@ -22,6 +22,8 @@ type AppConfig struct {
 	DummyPrice                string
 	QuoteValidDurationSeconds int64
 	AssetMapping              map[string]string // Maps asset addresses to underlying symbols (ETH, BTC, SOL)
+	ExchangeName              string            // Name of the exchange to use (e.g., "deribit", "okx", "bybit")
+	ExchangeTestMode          bool              // Whether to use the exchange's testnet
 }
 
 // LoadConfig parses command-line flags and environment variables
@@ -33,6 +35,8 @@ func LoadConfig() *AppConfig {
 	flag.StringVar(&cfg.RFQAssetAddressesCSV, "rfq_asset_addresses", "", "Comma-separated list of asset addresses for RFQ streams (e.g., 0xAsset1,0xAsset2)")
 	flag.StringVar(&cfg.DummyPrice, "dummy_price", "1000000", "Dummy price to quote (ensure format matches Rysk requirements, e.g., units)")
 	flag.Int64Var(&cfg.QuoteValidDurationSeconds, "quote_valid_duration_seconds", 30, "How long your quotes will be valid in seconds")
+	flag.StringVar(&cfg.ExchangeName, "exchange", "deribit", "Exchange to use for hedging (e.g., deribit, okx, bybit)")
+	flag.BoolVar(&cfg.ExchangeTestMode, "exchange_test_mode", false, "Use exchange testnet (true) or mainnet (false)")
 	flag.Parse()
 
 	cfg.MakerAddress = os.Getenv("MAKER_ADDRESS")

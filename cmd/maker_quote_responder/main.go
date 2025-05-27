@@ -21,6 +21,18 @@ const (
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	cfg := LoadConfig()
+	
+	// Create exchange instance using factory
+	factory := NewExchangeFactory()
+	exchange, err := factory.CreateExchange(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create exchange: %v", err)
+	}
+	if cfg.ExchangeTestMode {
+		log.Printf("Successfully initialized %s exchange in TEST MODE", cfg.ExchangeName)
+	} else {
+		log.Printf("Successfully initialized %s exchange in PRODUCTION MODE", cfg.ExchangeName)
+	}
 
 	// appCtx governs the entire application lifecycle, cancelled by OS signals.
 	appCtx, appCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -92,7 +104,31 @@ appRunningLoop:
 				}
 				log.Printf("[%s] Received Result for ID %s: %s", clientIdentifier, baseResponse.ID, string(baseResponse.Result))
 			} else if baseResponse.Method != "" {
-				log.Printf("[%s] Received unhandled method '%s' with ID %s. Params: %s", clientIdentifier, baseResponse.Method, baseResponse.ID, string(baseResponse.Params))
+				// Handle different methods
+				switch baseResponse.Method {
+				case "rfq_confirmation":
+					// Handle RFQ confirmation - this means a trade was executed
+					var confirmation RFQConfirmation
+					if err := json.Unmarshal(baseResponse.Params, &confirmation); err != nil {
+						log.Printf("[%s] Error unmarshalling rfq_confirmation params: %v", clientIdentifier, err)
+						return
+					}
+					log.Printf("[%s] Received RFQ confirmation for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+					
+					// Get the underlying asset from the asset mapping
+					if underlying, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
+						// Hedge the order on the exchange
+						if err := HedgeOrder(confirmation, underlying, cfg, exchange); err != nil {
+							log.Printf("[%s] Error hedging order: %v", clientIdentifier, err)
+						} else {
+							log.Printf("[%s] Successfully hedged order for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+						}
+					} else {
+						log.Printf("[%s] No asset mapping for %s. Cannot hedge.", clientIdentifier, confirmation.AssetAddress)
+					}
+				default:
+					log.Printf("[%s] Received unhandled method '%s' with ID %s. Params: %s", clientIdentifier, baseResponse.Method, baseResponse.ID, string(baseResponse.Params))
+				}
 			} else {
 				log.Printf("[%s] Received message with no error, result, or method. ID: %s. Raw: %s", clientIdentifier, baseResponse.ID, string(message))
 			}
@@ -125,7 +161,7 @@ appRunningLoop:
 				localRfqSdkClient := rfqSdkClient // Capture client for this handler
 
 				localRfqSdkClient.SetHandler(func(message []byte) {
-					HandleRfqMessage(message, currentAssetAddr, mainSdkClient, cfg) // mainSdkClient is from the outer scope
+					HandleRfqMessage(message, currentAssetAddr, mainSdkClient, cfg, exchange) // mainSdkClient is from the outer scope
 				})
 			}
 			log.Printf("RFQ stream setup complete for session. %d streams active.", len(rfqClients))

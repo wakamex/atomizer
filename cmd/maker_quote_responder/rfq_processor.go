@@ -27,8 +27,8 @@ func isDebounced(rfqID string) bool {
 	return false
 }
 
-// Generates and sends a quote response with real-time Deribit pricing or dummy fallback
-func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID string, cfg *AppConfig) {
+// Generates and sends a quote response with real-time exchange pricing or dummy fallback
+func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID string, cfg *AppConfig, exchange Exchange) {
 	// Create base quote params
 	quoteParams := ryskcore.Quote{
 		AssetAddress: rfq.Asset, ChainID: rfq.ChainID, Expiry: rfq.Expiry, IsPut: rfq.IsPut,
@@ -37,12 +37,12 @@ func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID str
 		ValidUntil: time.Now().Unix() + cfg.QuoteValidDurationSeconds,
 	}
 
-	// Try real-time pricing from Deribit if asset mapping exists
+	// Try real-time pricing from exchange if asset mapping exists
 	if underlying, hasMapping := cfg.AssetMapping[rfq.Asset]; hasMapping {
-		if deribitQuote, err := MakeQuote(rfq, underlying, originalRfqID, cfg); err != nil {
-			log.Printf("[Quote %s] Error getting Deribit quote: %v. Falling back to dummy price.", originalRfqID, err)
+		if exchangeQuote, err := MakeQuote(rfq, underlying, originalRfqID, cfg, exchange); err != nil {
+			log.Printf("[Quote %s] Error getting %s quote: %v. Falling back to dummy price.", originalRfqID, cfg.ExchangeName, err)
 		} else {
-			quoteParams = deribitQuote
+			quoteParams = exchangeQuote
 			quoteParams.ValidUntil = time.Now().Unix() + cfg.QuoteValidDurationSeconds
 		}
 	} else {
@@ -78,7 +78,7 @@ func sendQuoteResponse(client *ryskcore.Client, rfq RFQResult, originalRfqID str
 
 
 // Processes incoming RFQ (Request for Quote) messages and responds with quotes
-func HandleRfqMessage(message []byte, currentAssetAddr string, mainQuoteSenderClient *ryskcore.Client, cfg *AppConfig) {
+func HandleRfqMessage(message []byte, currentAssetAddr string, mainQuoteSenderClient *ryskcore.Client, cfg *AppConfig, exchange Exchange) {
 	log.Printf("RFQ In (%s): %s", currentAssetAddr, string(message))
 
 	var rfqNotification RFQNotification
@@ -94,6 +94,6 @@ func HandleRfqMessage(message []byte, currentAssetAddr string, mainQuoteSenderCl
 		rfqData.ReceivedTS = time.Now().UnixNano()
 		log.Printf("Parsed RFQ (ID: %s, Asset: %s from stream %s): ChainID=%d, Expiry=%d, IsPut=%t, Quantity=%s, Strike=%s",
 			rfqNotification.ID, rfqData.Asset, currentAssetAddr, rfqData.ChainID, rfqData.Expiry, rfqData.IsPut, rfqData.Quantity, rfqData.Strike)
-		go sendQuoteResponse(mainQuoteSenderClient, rfqData, rfqNotification.ID, cfg)
+		go sendQuoteResponse(mainQuoteSenderClient, rfqData, rfqNotification.ID, cfg, exchange)
 	}
 }
