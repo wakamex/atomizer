@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -18,8 +22,51 @@ const (
 	sessionMaxBackoff     = 30 * time.Second
 )
 
+// getBuildHash returns a hash of the binary to identify different builds
+func getBuildHash() string {
+	// Try to get build info
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	
+	// Create a hash from build info
+	h := sha256.New()
+	h.Write([]byte(info.Main.Version))
+	h.Write([]byte(info.Main.Sum))
+	h.Write([]byte(info.GoVersion))
+	
+	// Add VCS info if available
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" || setting.Key == "vcs.time" {
+			h.Write([]byte(setting.Value))
+		}
+	}
+	
+	// If we can read the binary itself, add its hash
+	if exePath, err := os.Executable(); err == nil {
+		if data, err := os.ReadFile(exePath); err == nil {
+			// Just hash first 1MB to avoid memory issues with large binaries
+			maxLen := 1024 * 1024
+			if len(data) > maxLen {
+				data = data[:maxLen]
+			}
+			h.Write(data)
+		}
+	}
+	
+	return hex.EncodeToString(h.Sum(nil))[:16] // Return first 16 chars for brevity
+}
+
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+	
+	// Print build hash as first output
+	buildHash := getBuildHash()
+	log.Printf("========================================")
+	log.Printf("Build hash: %s", buildHash)
+	log.Printf("========================================")
+	
 	cfg := LoadConfig()
 	
 	// Create exchange instance using factory
