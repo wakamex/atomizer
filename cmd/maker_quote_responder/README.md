@@ -1,6 +1,13 @@
 # Maker Quote Responder Application
 
-This application is a production-ready market maker that connects to the Rysk Finance WebSocket API, listens for Request for Quotes (RFQs), responds with competitive quotes using real-time Deribit prices, and automatically hedges positions on Deribit when trades are executed.
+This application is a production-ready market maker that connects to the Rysk Finance WebSocket API, listens for Request for Quotes (RFQs), responds with competitive quotes using real-time prices from multiple exchanges, and automatically hedges positions when trades are executed.
+
+## Supported Exchanges
+
+- **Deribit**: Full support with standard API keys or Ed25519 asymmetric keys
+- **Derive (Lyra)**: Full support using Ethereum private key authentication
+- **OKX**: Planned
+- **Bybit**: Planned
 
 ## Prerequisites
 
@@ -8,13 +15,21 @@ This application is a production-ready market maker that connects to the Rysk Fi
 2.  **Environment File (`.env`)**: Create a `.env` file in the current directory (`cmd/maker_quote_responder/`) with the following content:
     ```env
     # Private key for signing quotes (without 0x prefix)
+    # Also used for Derive authentication
     PRIVATE_KEY=your_private_key_here
     
-    # Deribit API credentials (for hedging)
-    DERIBIT_API_KEY=your_deribit_testnet_key
-    DERIBIT_API_SECRET=your_deribit_testnet_secret
+    # Exchange selection (default: deribit)
+    EXCHANGE=derive  # or deribit, okx, bybit
+    
+    # For Deribit - Option 1: Standard API credentials
+    DERIBIT_API_KEY=your_deribit_key
+    DERIBIT_API_SECRET=your_deribit_secret
+    
+    # For Deribit - Option 2: Ed25519 asymmetric authentication
+    DERIBIT_CLIENT_ID=your_client_id
+    ASYMMETRIC_PRIVATE_KEY=your_ed25519_private_key
     ```
-    Replace the placeholders with your actual credentials.
+    Replace the placeholders with your actual credentials. Only include credentials for the exchange you're using.
 
 ## Building the Application
 
@@ -52,9 +67,11 @@ The `run.sh` script is pre-configured with default values for command-line argum
 *   `MAKER_ADDRESS`: Your Ethereum maker address (e.g., `0x9eAFc0c2b04D96a1C1edAdda8A474a4506752207`).
 *   `WEBSOCKET_URL`: The Rysk Finance WebSocket URL (e.g., `wss://rip-testnet.rysk.finance/maker`).
 *   `RFQ_ASSET_ADDRESSES`: Comma-separated list of RFQ asset addresses (e.g., `0xb67bfa7b488df4f2efa874f4e59242e9130ae61f`). This will be passed to the `--rfq_asset_addresses` flag.
-*   `DUMMY_PRICE`: The fallback price when Deribit pricing fails (e.g., `12500000000000000000`).
+*   `DUMMY_PRICE`: The fallback price when exchange pricing fails (e.g., `12500000000000000000`).
 *   `QUOTE_VALID_DURATION_SECONDS`: Duration in seconds for how long the quote should be valid (e.g., `45`).
 *   `ASSET_MAPPING`: JSON mapping of asset addresses to underlying symbols (e.g., `{"0xb67bfa7b488df4f2efa874f4e59242e9130ae61f":"ETH"}`)
+*   `EXCHANGE`: Which exchange to use for pricing and hedging (e.g., `derive`, `deribit`)
+*   `EXCHANGE_TEST_MODE`: Whether to use exchange testnet (`true`) or mainnet (`false`)
 
 ### Manual Execution (without `run.sh`)
 
@@ -88,21 +105,28 @@ env $(cat .env | grep -v '^#' | xargs) \
 
 ## Key Features
 
-### 1. Real-time Pricing with Deribit
-The application fetches live option prices from Deribit to generate competitive quotes:
-- Converts RFQ parameters to Deribit instrument format
-- Calculates prices based on order book depth
-- Applies configurable market maker premium/discount
-- Falls back to dummy pricing if Deribit is unavailable
+### 1. Multi-Exchange Support
+The application supports multiple exchanges with a unified interface:
+- **Deribit**: Full order book support, Ed25519 authentication available
+- **Derive**: Uses FetchTicker API (order book not supported), paginated market loading
+- Exchange-specific instrument format conversion
+- Automatic failover to dummy pricing if exchange is unavailable
 
 ### 2. Automatic Hedging
 When a trade is executed on RyskV12:
 - Receives trade confirmation via WebSocket
-- Automatically places hedge order on Deribit (testnet)
-- Uses fill-or-kill orders with 10% slippage protection
+- Automatically places hedge order on configured exchange
+- Always sells calls at 2x the best ask price for testing safety
 - Logs all hedge attempts and results
 
-### 3. Asset Mapping
+### 3. Market Data Caching
+Efficient caching system for market data:
+- File-based cache with TTL support (default: 1 hour)
+- Reduces API calls and improves startup time
+- Cache located in `./cache/` directory
+- Easily extensible to Redis or other backends
+
+### 4. Asset Mapping
 Configure which assets to quote on using the `ASSET_MAPPING` environment variable:
 ```json
 {
@@ -131,8 +155,23 @@ The application logs all important events:
 - Hedge order placements and results
 - Connection status and errors
 
+## Monitoring Tools
+
+### Order Monitoring
+Monitor open orders on Derive:
+```bash
+./monitor_derive_orders.sh
+```
+
+### Manual Order Testing
+Test order placement manually:
+```bash
+./test_derive_order.sh "ETH-20250627-3800-C" 0.1 2.0
+```
+
 ## Limitations
 
 - Currently supports only call options (puts return an error)
-- Hedging is available only on Deribit testnet
+- Derive: Order book not supported, uses ticker prices only
+- Market data pagination handled only for Derive
 - Requires manual asset mapping configuration

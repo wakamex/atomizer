@@ -35,7 +35,7 @@ func LoadConfig() *AppConfig {
 	flag.StringVar(&cfg.RFQAssetAddressesCSV, "rfq_asset_addresses", "", "Comma-separated list of asset addresses for RFQ streams (e.g., 0xAsset1,0xAsset2)")
 	flag.StringVar(&cfg.DummyPrice, "dummy_price", "1000000", "Dummy price to quote (ensure format matches Rysk requirements, e.g., units)")
 	flag.Int64Var(&cfg.QuoteValidDurationSeconds, "quote_valid_duration_seconds", 30, "How long your quotes will be valid in seconds")
-	flag.StringVar(&cfg.ExchangeName, "exchange", "deribit", "Exchange to use for hedging (e.g., deribit, okx, bybit)")
+	flag.StringVar(&cfg.ExchangeName, "exchange", "derive", "Exchange to use for hedging (e.g., derive, deribit, okx, bybit)")
 	flag.BoolVar(&cfg.ExchangeTestMode, "exchange_test_mode", false, "Use exchange testnet (true) or mainnet (false)")
 	flag.Parse()
 

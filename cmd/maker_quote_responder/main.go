@@ -149,6 +149,30 @@ appRunningLoop:
 					log.Printf("[%s] Received 'OK' confirmation for ID %s. Full message: %s", clientIdentifier, baseResponse.ID, string(message))
 					return
 				}
+				
+				// Check if this is a trade confirmation
+				if baseResponse.ID == "trade" {
+					var confirmation RFQConfirmation
+					if err := json.Unmarshal(baseResponse.Result, &confirmation); err != nil {
+						log.Printf("[%s] Error unmarshalling trade confirmation: %v", clientIdentifier, err)
+					} else {
+						log.Printf("[%s] Received trade confirmation for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+						
+						// Get the underlying asset from the asset mapping
+						if underlying, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
+							// Hedge the order on the exchange
+							if err := HedgeOrder(confirmation, underlying, cfg, exchange); err != nil {
+								log.Printf("[%s] Error hedging order: %v", clientIdentifier, err)
+							} else {
+								log.Printf("[%s] Successfully hedged order for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+							}
+						} else {
+							log.Printf("[%s] No asset mapping for %s. Cannot hedge.", clientIdentifier, confirmation.AssetAddress)
+						}
+						return
+					}
+				}
+				
 				log.Printf("[%s] Received Result for ID %s: %s", clientIdentifier, baseResponse.ID, string(baseResponse.Result))
 			} else if baseResponse.Method != "" {
 				// Handle different methods

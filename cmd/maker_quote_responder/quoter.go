@@ -89,6 +89,9 @@ func getPriceInclSlippage(req RFQResult, book CCXTOrderBook) (float64, error) {
 	// convert the priceFloat to the correct units
 	amountFloat = amountFloat / 1e5
 	amount = strconv.FormatFloat(amountFloat, 'f', -1, 64)
+	
+	// Debug logging
+	log.Printf("[Quote] Amount calculation: quantity=%s, amountFloat=%f", req.Quantity, amountFloat)
 
 	var cumSize float64
 	var price float64
@@ -105,10 +108,21 @@ func getPriceInclSlippage(req RFQResult, book CCXTOrderBook) (float64, error) {
 			break
 		}
 	}
-	if cumSize < amountFloat {
-		return 0.0, fmt.Errorf("cannot quote due to liquidity")
+	
+	log.Printf("[Quote] Liquidity check: amountFloat=%f, cumSize=%f, quotes=%d", amountFloat, cumSize, len(quotes))
+	
+	// For options market making, we provide liquidity even if order book is thin
+	// We'll quote based on the best price available
+	if cumSize < amountFloat && len(quotes) > 0 {
+		log.Printf("[Quote] Insufficient book size, but proceeding with best available price")
+		// Use the last (best) price we saw
+	} else if len(quotes) == 0 {
+		return 0.0, fmt.Errorf("no quotes available")
 	}
-	dollarPrice := math.Round(price * book.Index)
+	// For options, the price is already in USD, don't multiply by index
+	// TODO: This logic might need to be different for futures vs options
+	dollarPrice := math.Round(price)
+	
 	// consider 20% premium
 	premium := float64(10)
 	// we take the bid to make more money
