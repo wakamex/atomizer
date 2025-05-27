@@ -64,31 +64,62 @@ func (f *ExchangeFactory) CreateExchange(cfg *AppConfig) (Exchange, error) {
 		return NewDeribitExchange(config), nil
 		
 	case "derive":
-		// Check for Derive API credentials
-		deriveAPIKey := os.Getenv("DERIVE_API_KEY")
-		deriveAPISecret := os.Getenv("DERIVE_API_SECRET")
+		// Use default private key for Derive
+		privateKey := os.Getenv("PRIVATE_KEY")
+		makerAddress := os.Getenv("MAKER_ADDRESS")
 		
-		if deriveAPIKey == "" || deriveAPISecret == "" {
-			return nil, fmt.Errorf("Derive credentials not found. Set DERIVE_API_KEY and DERIVE_API_SECRET")
+		if privateKey == "" || makerAddress == "" {
+			return nil, fmt.Errorf("Derive credentials not found. Set PRIVATE_KEY and MAKER_ADDRESS")
 		}
 		
-		log.Printf("Using Derive exchange with API key authentication")
+		log.Printf("Using Derive exchange with private key authentication for address: %s", makerAddress)
 		config := ExchangeConfig{
-			APIKey:    deriveAPIKey,
-			APISecret: deriveAPISecret,
+			APIKey:    privateKey,
+			APISecret: "", // Derive uses private key signing, not API secret
 			TestMode:  cfg.ExchangeTestMode,
 			RateLimit: 10,
 		}
-		return NewDeriveExchange(config), nil
+		// Use Derive-specific CCXT wrapper
+		return NewCCXTDeriveExchange(config)
 		
-	// Placeholder for future exchanges
 	case "okx":
-		// TODO: Implement OKX exchange when adding support
-		return nil, fmt.Errorf("OKX exchange not yet implemented")
+		// Check for OKX API credentials
+		okxAPIKey := os.Getenv("OKX_API_KEY")
+		okxAPISecret := os.Getenv("OKX_API_SECRET")
+		okxPassphrase := os.Getenv("OKX_PASSPHRASE")
+		
+		if okxAPIKey == "" || okxAPISecret == "" || okxPassphrase == "" {
+			return nil, fmt.Errorf("OKX credentials not found. Set OKX_API_KEY, OKX_API_SECRET, and OKX_PASSPHRASE")
+		}
+		
+		log.Printf("Using OKX exchange with API key authentication")
+		// config := ExchangeConfig{
+		// 	APIKey:    okxAPIKey,
+		// 	APISecret: okxAPISecret,
+		// 	TestMode:  cfg.ExchangeTestMode,
+		// 	RateLimit: 10,
+		// }
+		// TODO: Implement OKX with CCXT
+		return nil, fmt.Errorf("OKX implementation pending")
 		
 	case "bybit":
-		// TODO: Implement Bybit exchange when adding support
-		return nil, fmt.Errorf("Bybit exchange not yet implemented")
+		// Check for Bybit API credentials
+		bybitAPIKey := os.Getenv("BYBIT_API_KEY")
+		bybitAPISecret := os.Getenv("BYBIT_API_SECRET")
+		
+		if bybitAPIKey == "" || bybitAPISecret == "" {
+			return nil, fmt.Errorf("Bybit credentials not found. Set BYBIT_API_KEY and BYBIT_API_SECRET")
+		}
+		
+		log.Printf("Using Bybit exchange with API key authentication")
+		_ = ExchangeConfig{
+			APIKey:    bybitAPIKey,
+			APISecret: bybitAPISecret,
+			TestMode:  cfg.ExchangeTestMode,
+			RateLimit: 10,
+		}
+		// TODO: Implement Bybit with CCXT
+		return nil, fmt.Errorf("Bybit implementation pending")
 		
 	default:
 		return nil, fmt.Errorf("unsupported exchange: %s", exchangeName)
@@ -97,5 +128,5 @@ func (f *ExchangeFactory) CreateExchange(cfg *AppConfig) (Exchange, error) {
 
 // GetSupportedExchanges returns a list of supported exchange names
 func (f *ExchangeFactory) GetSupportedExchanges() []string {
-	return []string{"deribit", "derive"} // Add more as they are implemented
+	return []string{"deribit", "derive", "okx", "bybit"}
 }
