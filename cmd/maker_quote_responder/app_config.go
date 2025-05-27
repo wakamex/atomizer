@@ -53,11 +53,22 @@ func LoadConfig() *AppConfig {
 	if cfg.PrivateKey == "" {
 		log.Fatal("Error: PRIVATE_KEY environment variable is not set or empty.")
 	}
-	if cfg.DeribitApiKey == "" {
-		log.Fatal("Error: DERIBIT_API_KEY environment variable is not set or empty.")
-	}
-	if cfg.DeribitApiSecret == "" {
-		log.Fatal("Error: DERIBIT_API_SECRET environment variable is not set or empty.")
+	
+	// Only check for Deribit credentials if Deribit is the selected exchange
+	if strings.ToLower(cfg.ExchangeName) == "deribit" {
+		// Check for asymmetric key first
+		asymmetricPrivateKey := os.Getenv("ASYMMETRIC_PRIVATE_KEY")
+		deribitClientId := os.Getenv("DERIBIT_CLIENT_ID")
+		
+		// Only require standard API credentials if asymmetric auth is not available
+		if asymmetricPrivateKey == "" || deribitClientId == "" {
+			if cfg.DeribitApiKey == "" {
+				log.Fatal("Error: DERIBIT_API_KEY environment variable is not set or empty (or provide ASYMMETRIC_PRIVATE_KEY and DERIBIT_CLIENT_ID).")
+			}
+			if cfg.DeribitApiSecret == "" {
+				log.Fatal("Error: DERIBIT_API_SECRET environment variable is not set or empty (or provide ASYMMETRIC_PRIVATE_KEY and DERIBIT_CLIENT_ID).")
+			}
+		}
 	}
 	
 	// Validate private key format
