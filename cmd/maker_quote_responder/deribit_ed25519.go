@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"

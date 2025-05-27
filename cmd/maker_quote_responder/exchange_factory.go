@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 )
 
@@ -22,6 +24,37 @@ func (f *ExchangeFactory) CreateExchange(cfg *AppConfig) (Exchange, error) {
 	
 	switch exchangeName {
 	case "deribit":
+		// Check if we have asymmetric key credentials
+		clientID := os.Getenv("DERIBIT_CLIENT_ID")
+		privateKey := os.Getenv("DERIBIT_PRIVATE_KEY")
+		privateKeyFile := os.Getenv("DERIBIT_PRIVATE_KEY_FILE")
+		
+		// If we have client ID and private key, use asymmetric authentication
+		if clientID != "" && (privateKey != "" || privateKeyFile != "") {
+			log.Printf("Using Deribit with asymmetric key authentication (Client ID: %s)", clientID)
+			
+			// Read private key from file if specified
+			if privateKeyFile != "" && privateKey == "" {
+				keyData, err := ioutil.ReadFile(privateKeyFile)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read private key file: %w", err)
+				}
+				privateKey = string(keyData)
+			}
+			
+			config := ExchangeConfig{
+				TestMode:  cfg.ExchangeTestMode,
+				RateLimit: 10,
+			}
+			return NewDeribitAsymmetricExchange(config, clientID, privateKey)
+		}
+		
+		// Otherwise use standard API key/secret with CCXT
+		if cfg.DeribitApiKey == "" || cfg.DeribitApiSecret == "" {
+			return nil, fmt.Errorf("Deribit credentials not found. Set either DERIBIT_CLIENT_ID + DERIBIT_PRIVATE_KEY for asymmetric auth, or DERIBIT_API_KEY + DERIBIT_API_SECRET for standard auth")
+		}
+		
+		log.Printf("Using Deribit with standard API key authentication")
 		config := ExchangeConfig{
 			APIKey:    cfg.DeribitApiKey,
 			APISecret: cfg.DeribitApiSecret,
