@@ -63,6 +63,24 @@ func (f *ExchangeFactory) CreateExchange(cfg *AppConfig) (Exchange, error) {
 		}
 		return NewDeribitExchange(config), nil
 		
+	case "derive":
+		// Check for Derive API credentials
+		deriveAPIKey := os.Getenv("DERIVE_API_KEY")
+		deriveAPISecret := os.Getenv("DERIVE_API_SECRET")
+		
+		if deriveAPIKey == "" || deriveAPISecret == "" {
+			return nil, fmt.Errorf("Derive credentials not found. Set DERIVE_API_KEY and DERIVE_API_SECRET")
+		}
+		
+		log.Printf("Using Derive exchange with API key authentication")
+		config := ExchangeConfig{
+			APIKey:    deriveAPIKey,
+			APISecret: deriveAPISecret,
+			TestMode:  cfg.ExchangeTestMode,
+			RateLimit: 10,
+		}
+		return NewDeriveExchange(config), nil
+		
 	// Placeholder for future exchanges
 	case "okx":
 		// TODO: Implement OKX exchange when adding support
@@ -79,5 +97,5 @@ func (f *ExchangeFactory) CreateExchange(cfg *AppConfig) (Exchange, error) {
 
 // GetSupportedExchanges returns a list of supported exchange names
 func (f *ExchangeFactory) GetSupportedExchanges() []string {
-	return []string{"deribit"} // Add more as they are implemented
+	return []string{"deribit", "derive"} // Add more as they are implemented
 }
