@@ -61,6 +61,8 @@ echo "WebSocket URL: $WEBSOCKET_URL"
 echo "RFQ Asset Addresses: $RFQ_ASSET_ADDRESSES"
 echo "Dummy Price: $DUMMY_PRICE"
 echo "Quote Valid Duration Seconds: $QUOTE_VALID_DURATION_SECONDS"
+echo "Exchange: $EXCHANGE"
+echo "Exchange Test Mode: $EXCHANGE_TEST_MODE"
 
 echo "Starting Maker Quote Responder..."
 
@@ -73,6 +75,8 @@ MAKER_ADDRESS="$MAKER_ADDRESS" \
     --websocket_url="$WEBSOCKET_URL" \
     --rfq_asset_addresses="$RFQ_ASSET_ADDRESSES" \
     --dummy_price="$DUMMY_PRICE" \
-    --quote_valid_duration_seconds="$QUOTE_VALID_DURATION_SECONDS"
+    --quote_valid_duration_seconds="$QUOTE_VALID_DURATION_SECONDS" \
+    --exchange="$EXCHANGE" \
+    --exchange_test_mode="$EXCHANGE_TEST_MODE"
 
 echo "Maker Quote Responder finished or was interrupted."
