@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	ccxt "github.com/ccxt/ccxt/go/v4"
@@ -18,6 +19,8 @@ type CCXTDeriveExchange struct {
 	exchange       *ccxt.Derive
 	config         ExchangeConfig
 	deriveMarkets  map[string]DeriveInstrument // Custom market data from Derive API
+	wsClient       *DeriveWSClient            // Persistent WebSocket connection
+	wsClientMu     sync.Mutex                 // Mutex to protect wsClient access
 }
 
 // NewCCXTDeriveExchange creates a new Derive exchange using CCXT
@@ -119,11 +122,19 @@ func NewCCXTDeriveExchange(config ExchangeConfig) (*CCXTDeriveExchange, error) {
 		log.Printf("[Derive] Found %d ETH options", ethOptionCount)
 	}
 	
-	return &CCXTDeriveExchange{
+	deriveExchange := &CCXTDeriveExchange{
 		exchange:      &exchange,
 		config:        config,
 		deriveMarkets: deriveMarkets,
-	}, nil
+	}
+	
+	// Initialize persistent WebSocket connection if we have the necessary config
+	if err := deriveExchange.initializeWebSocket(); err != nil {
+		log.Printf("[Derive] Warning: Failed to initialize persistent WebSocket: %v", err)
+		// Continue without persistent connection - will fall back to creating new connections
+	}
+	
+	return deriveExchange, nil
 }
 
 // GetOrderBook fetches the order book for a given option
@@ -417,7 +428,7 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 			return nil
 		}
 		
-		orderResp, apiErr := PlaceDeriveOrder(instrument, "sell", "limit", hedgePrice, quantity, d.config.APIKey, deriveWalletAddress, subaccountID)
+		orderResp, apiErr := d.placeDeriveOrderWithPersistentWS(instrument, "sell", "limit", hedgePrice, quantity, subaccountID)
 		if apiErr != nil {
 			log.Printf("[Hedge] Direct API order failed: %v", apiErr)
 			log.Printf("[Hedge] ⚠️  Order details: %s SELL %.4f @ %.2f USDC", instrument, quantity, hedgePrice)
@@ -471,4 +482,154 @@ func (d *CCXTDeriveExchange) ConvertToInstrument(asset string, strike string, ex
 		asset, strike, strikeNum, expiry, expiryStr, isPut, instrument)
 	
 	return instrument, nil
+}
+
+// initializeWebSocket creates a persistent WebSocket connection for order placement
+func (d *CCXTDeriveExchange) initializeWebSocket() error {
+	// Check if we have the necessary configuration
+	deriveWalletAddress := os.Getenv("DERIVE_WALLET_ADDRESS")
+	if deriveWalletAddress == "" {
+		return fmt.Errorf("DERIVE_WALLET_ADDRESS not set")
+	}
+	
+	if d.config.APIKey == "" {
+		return fmt.Errorf("private key not configured")
+	}
+	
+	// Create WebSocket client
+	wsClient, err := NewDeriveWSClient(d.config.APIKey, deriveWalletAddress)
+	if err != nil {
+		return fmt.Errorf("failed to create WebSocket client: %w", err)
+	}
+	
+	d.wsClientMu.Lock()
+	d.wsClient = wsClient
+	d.wsClientMu.Unlock()
+	
+	log.Printf("[Derive] Persistent WebSocket connection established")
+	return nil
+}
+
+// getOrCreateWebSocket returns the persistent WebSocket client or creates a new one
+func (d *CCXTDeriveExchange) getOrCreateWebSocket() (*DeriveWSClient, bool, error) {
+	d.wsClientMu.Lock()
+	defer d.wsClientMu.Unlock()
+	
+	// If we have a persistent connection, use it
+	if d.wsClient != nil {
+		return d.wsClient, false, nil // false means don't close after use
+	}
+	
+	// Otherwise create a new one (will be closed after use)
+	deriveWalletAddress := os.Getenv("DERIVE_WALLET_ADDRESS")
+	if deriveWalletAddress == "" {
+		return nil, false, fmt.Errorf("DERIVE_WALLET_ADDRESS not set")
+	}
+	
+	wsClient, err := NewDeriveWSClient(d.config.APIKey, deriveWalletAddress)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to create WebSocket client: %w", err)
+	}
+	
+	return wsClient, true, nil // true means close after use
+}
+
+// placeDeriveOrderWithPersistentWS places an order using the persistent WebSocket connection
+func (d *CCXTDeriveExchange) placeDeriveOrderWithPersistentWS(instrumentName string, side string, orderType string, price float64, amount float64, subaccountID uint64) (*DeriveOrderResponse, error) {
+	// Get WebSocket client (persistent or new)
+	wsClient, shouldClose, err := d.getOrCreateWebSocket()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get WebSocket client: %w", err)
+	}
+	
+	// Only close if we created a new connection
+	if shouldClose {
+		defer wsClient.Close()
+	}
+	
+	// Get derive wallet address
+	deriveWalletAddress := os.Getenv("DERIVE_WALLET_ADDRESS")
+	if deriveWalletAddress == "" {
+		return nil, fmt.Errorf("DERIVE_WALLET_ADDRESS not set")
+	}
+	
+	// Create auth for signing
+	auth, err := NewDeriveAuth(d.config.APIKey)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Get instrument details
+	instrument, err := FetchDeriveInstrumentDetails(instrumentName)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Create and sign action
+	action := &DeriveAction{
+		SubaccountID:       subaccountID,
+		Owner:              deriveWalletAddress,
+		Signer:             auth.address.Hex(),
+		SignatureExpirySec: time.Now().Unix() + 3600,
+		Nonce:              uint64(time.Now().UnixNano()),
+		ModuleAddress:      "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b", // Trade module
+		AssetAddress:       instrument.BaseAssetAddress,
+		SubID:              instrument.BaseAssetSubID,
+		LimitPrice:         func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(price), big.NewFloat(1e18)).Int(nil); return v }(),
+		Amount:             func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(amount), big.NewFloat(1e18)).Int(nil); return v }(),
+		MaxFee:             new(big.Int).Mul(big.NewInt(1000), big.NewInt(1e18)), // 1000 USDC max fee
+		RecipientID:        subaccountID,
+		IsBid:              side == "buy",
+	}
+	
+	if err := action.Sign(auth.privateKey); err != nil {
+		return nil, err
+	}
+	
+	// Prepare order request
+	orderReq := map[string]interface{}{
+		"instrument_name":      instrumentName,
+		"direction":           side,
+		"order_type":         orderType,
+		"time_in_force":      "gtc",
+		"mmp":                false,
+		"subaccount_id":      subaccountID,
+		"nonce":              action.Nonce,
+		"signer":             action.Signer,
+		"signature_expiry_sec": action.SignatureExpirySec,
+		"signature":          action.Signature,
+		"limit_price":        fmt.Sprintf("%.6f", price),
+		"amount":             fmt.Sprintf("%.6f", amount),
+		"max_fee":            "1000",
+	}
+	
+	// Submit order via WebSocket
+	orderResp, err := wsClient.SubmitOrder(orderReq)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Query open orders to verify
+	openOrders, err := wsClient.GetOpenOrders(subaccountID)
+	if err != nil {
+		log.Printf("[Derive Order] Warning: failed to query open orders: %v", err)
+	} else {
+		log.Printf("[Derive Order] Open orders after submission: %d orders", len(openOrders))
+	}
+	
+	return orderResp, nil
+}
+
+// Close closes the persistent WebSocket connection if it exists
+func (d *CCXTDeriveExchange) Close() error {
+	d.wsClientMu.Lock()
+	defer d.wsClientMu.Unlock()
+	
+	if d.wsClient != nil {
+		d.wsClient.Close()
+		d.wsClient = nil
+		log.Printf("[Derive] Persistent WebSocket connection closed")
+	}
+	
+	return nil
 }

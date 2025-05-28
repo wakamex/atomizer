@@ -41,6 +41,21 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 		return nil, fmt.Errorf("failed to connect to Derive WebSocket: %w", err)
 	}
 	client.conn = conn
+	
+	// Set up ping/pong handlers with label
+	conn.SetPingHandler(func(appData string) error {
+		log.Printf("[Derive WS] Ping received, sending Pong")
+		err := conn.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(5*time.Second))
+		if err != nil {
+			log.Printf("[Derive WS] Error sending pong: %v", err)
+		}
+		return nil
+	})
+	
+	conn.SetPongHandler(func(appData string) error {
+		log.Printf("[Derive WS] Pong received")
+		return nil
+	})
 
 	// Start message handler
 	go client.handleMessages()
@@ -50,8 +65,41 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 		conn.Close()
 		return nil, fmt.Errorf("failed to login: %w", err)
 	}
+	
+	// Start heartbeat to keep connection alive
+	go client.heartbeat()
 
 	return client, nil
+}
+
+// heartbeat sends periodic pings to keep the connection alive
+func (c *DeriveWSClient) heartbeat() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.Lock()
+			if c.conn == nil {
+				c.mu.Unlock()
+				return
+			}
+			
+			// Send ping
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("[Derive WS] Error sending ping: %v", err)
+				c.mu.Unlock()
+				return
+			}
+			c.mu.Unlock()
+			
+		case <-time.After(60 * time.Second):
+			// If we haven't received anything in 60 seconds, consider the connection dead
+			log.Printf("[Derive WS] No activity for 60 seconds, connection may be dead")
+			return
+		}
+	}
 }
 
 // login authenticates the WebSocket session
