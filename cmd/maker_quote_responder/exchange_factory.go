@@ -64,15 +64,23 @@ func (f *ExchangeFactory) CreateExchange(cfg *AppConfig) (Exchange, error) {
 		return NewDeribitExchange(config), nil
 		
 	case "derive":
-		// Use default private key for Derive
-		privateKey := os.Getenv("PRIVATE_KEY")
-		makerAddress := os.Getenv("MAKER_ADDRESS")
-		
-		if privateKey == "" || makerAddress == "" {
-			return nil, fmt.Errorf("Derive credentials not found. Set PRIVATE_KEY and MAKER_ADDRESS")
+		// Use Derive-specific private key
+		privateKey := os.Getenv("DERIVE_PRIVATE_KEY")
+		if privateKey != "" {
+			log.Printf("Using DERIVE_PRIVATE_KEY for Derive exchange")
+		} else {
+			// Fallback to general private key
+			privateKey = os.Getenv("PRIVATE_KEY")
+			log.Printf("Using PRIVATE_KEY for Derive exchange (DERIVE_PRIVATE_KEY not set)")
 		}
 		
-		log.Printf("Using Derive exchange with private key authentication for address: %s", makerAddress)
+		deriveWallet := os.Getenv("DERIVE_WALLET_ADDRESS")
+		
+		if privateKey == "" || deriveWallet == "" {
+			return nil, fmt.Errorf("Derive credentials not found. Set DERIVE_PRIVATE_KEY (or PRIVATE_KEY) and DERIVE_WALLET_ADDRESS")
+		}
+		
+		log.Printf("Using Derive exchange with wallet: %s", deriveWallet)
 		config := ExchangeConfig{
 			APIKey:    privateKey,
 			APISecret: "", // Derive uses private key signing, not API secret

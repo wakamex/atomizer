@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -75,6 +76,10 @@ func (d *DeriveAuth) SignMessage(message string) (string, error) {
 	prefixedMessage := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(message), message)
 	hash := crypto.Keccak256Hash([]byte(prefixedMessage))
 	
+	log.Printf("[Derive Auth] Signing message: '%s'", message)
+	log.Printf("[Derive Auth] Prefixed message: '%s'", prefixedMessage)
+	log.Printf("[Derive Auth] Message hash: %s", hash.Hex())
+	
 	signature, err := crypto.Sign(hash.Bytes(), d.privateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign message: %w", err)
@@ -83,7 +88,10 @@ func (d *DeriveAuth) SignMessage(message string) (string, error) {
 	// Transform V from 0/1 to 27/28 according to the yellow paper
 	signature[64] += 27
 	
-	return "0x" + hex.EncodeToString(signature), nil
+	sigHex := hex.EncodeToString(signature)
+	log.Printf("[Derive Auth] Raw signature: %s", sigHex)
+	
+	return "0x" + sigHex, nil
 }
 
 // GetAddress returns the Ethereum address for this private key

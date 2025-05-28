@@ -89,7 +89,7 @@ func getPriceInclSlippage(req RFQResult, book CCXTOrderBook) (float64, error) {
 	// convert the priceFloat to the correct units
 	amountFloat = amountFloat / 1e5
 	amount = strconv.FormatFloat(amountFloat, 'f', -1, 64)
-	
+
 	// Debug logging
 	log.Printf("[Quote] Amount calculation: quantity=%s, amountFloat=%f", req.Quantity, amountFloat)
 
@@ -108,9 +108,9 @@ func getPriceInclSlippage(req RFQResult, book CCXTOrderBook) (float64, error) {
 			break
 		}
 	}
-	
+
 	log.Printf("[Quote] Liquidity check: amountFloat=%f, cumSize=%f, quotes=%d", amountFloat, cumSize, len(quotes))
-	
+
 	// For options market making, we provide liquidity even if order book is thin
 	// We'll quote based on the best price available
 	if cumSize < amountFloat && len(quotes) > 0 {
@@ -122,9 +122,9 @@ func getPriceInclSlippage(req RFQResult, book CCXTOrderBook) (float64, error) {
 	// For options, the price is already in USD, don't multiply by index
 	// TODO: This logic might need to be different for futures vs options
 	dollarPrice := math.Round(price)
-	
-	// consider 20% premium
-	premium := float64(10)
+
+	// consider premium - negative premium makes our bid MORE competitive
+	premium := float64(-50) // -50% premium means we bid 50% lower (more attractive to Rysk users)
 	// we take the bid to make more money
 	if req.IsTakerBuy {
 		dollarPrice = (math.Round(dollarPrice * (100 + premium)))

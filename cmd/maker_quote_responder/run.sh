@@ -64,6 +64,17 @@ echo "Quote Valid Duration Seconds: $QUOTE_VALID_DURATION_SECONDS"
 echo "Exchange: $EXCHANGE"
 echo "Exchange Test Mode: $EXCHANGE_TEST_MODE"
 
+# Print Derive-specific variables if using Derive exchange
+if [ "$EXCHANGE" = "derive" ]; then
+    echo "Derive Wallet Address: ${DERIVE_WALLET_ADDRESS:-Not set}"
+    echo "Derive Subaccount ID: ${DERIVE_SUBACCOUNT_ID:-Not set}"
+    if [ -n "$DERIVE_PRIVATE_KEY" ]; then
+        echo "Derive Private Key: Set (using DERIVE_PRIVATE_KEY)"
+    else
+        echo "Derive Private Key: Using PRIVATE_KEY"
+    fi
+fi
+
 echo "Starting Maker Quote Responder..."
 
 # Execute the application

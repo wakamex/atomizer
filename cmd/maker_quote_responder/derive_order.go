@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/big"
 	"net/http"
@@ -34,9 +33,9 @@ type DeriveAction struct {
 	ModuleAddress      string
 	AssetAddress       string
 	SubID              string
-	LimitPrice         int64
-	Amount             int64
-	MaxFee             int64
+	LimitPrice         *big.Int
+	Amount             *big.Int
+	MaxFee             *big.Int
 	RecipientID        uint64
 	IsBid              bool
 	Signature          string
@@ -45,17 +44,20 @@ type DeriveAction struct {
 // Sign signs the action using EIP-712
 func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 	// Protocol constants for mainnet
-	domainSeparator := common.HexToHash("0x9bcf4dc06df5d8bf23af818d5716491b995020f377d3b7b64c29ed14e3dd1105")
+	domainSeparator := common.HexToHash("0xd96e5f90797da7ec8dc4e276260c7f3f87fedf68775fbe1ef116e996fc60441b")
 	actionTypehash := common.HexToHash("0x4d7a9f27c403ff9c0f19bce61d76d82f9aa29f8d6d4b0c5474607d9770d1af17")
+	
+	log.Printf("[EIP-712] Using domain separator: %s", domainSeparator.Hex())
+	log.Printf("[EIP-712] Using action typehash: %s", actionTypehash.Hex())
 	
 	// Encode module data
 	subID, _ := new(big.Int).SetString(a.SubID, 10)
 	moduleData, err := encodeTradeModuleData(
 		common.HexToAddress(a.AssetAddress),
 		subID,
-		big.NewInt(a.LimitPrice),
-		big.NewInt(a.Amount),
-		big.NewInt(a.MaxFee),
+		a.LimitPrice,
+		a.Amount,
+		a.MaxFee,
 		a.RecipientID,
 		a.IsBid,
 	)
@@ -65,6 +67,7 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 	
 	// Hash module data
 	moduleDataHash := crypto.Keccak256Hash(moduleData)
+	log.Printf("[EIP-712] Module data hash: %s", moduleDataHash.Hex())
 	
 	// Encode action
 	actionData, err := encodeAction(
@@ -77,15 +80,19 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 		common.HexToAddress(a.Owner),
 		common.HexToAddress(a.Signer),
 	)
+	log.Printf("[EIP-712] Action data encoded, length: %d", len(actionData))
 	if err != nil {
 		return err
 	}
 	
 	// Create typed data hash
 	actionHash := crypto.Keccak256Hash(actionData)
+	log.Printf("[EIP-712] Action hash: %s", actionHash.Hex())
+	
 	message := append([]byte{0x19, 0x01}, domainSeparator.Bytes()...)
 	message = append(message, actionHash.Bytes()...)
 	typedDataHash := crypto.Keccak256Hash(message)
+	log.Printf("[EIP-712] Final typed data hash to sign: %s", typedDataHash.Hex())
 	
 	// Sign
 	signature, err := crypto.Sign(typedDataHash.Bytes(), privateKey)
@@ -157,8 +164,15 @@ type DeriveOrderResponse struct {
 	} `json:"error"`
 }
 
-// PlaceDeriveOrder places an order directly using Derive API
+// PlaceDeriveOrder places an order directly using Derive WebSocket API
 func PlaceDeriveOrder(instrumentName string, side string, orderType string, price float64, amount float64, privateKey string, deriveWalletAddress string, subaccountID uint64) (*DeriveOrderResponse, error) {
+	// Create WebSocket client
+	wsClient, err := NewDeriveWSClient(privateKey, deriveWalletAddress)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create WebSocket client: %w", err)
+	}
+	defer wsClient.Close()
+	
 	auth, err := NewDeriveAuth(privateKey)
 	if err != nil {
 		return nil, err
@@ -170,22 +184,39 @@ func PlaceDeriveOrder(instrumentName string, side string, orderType string, pric
 		return nil, fmt.Errorf("failed to fetch instrument: %w", err)
 	}
 	
+	log.Printf("[Derive Order] Instrument details - Name: %s, BaseAssetAddress: %s, SubID: %s", 
+		instrument.InstrumentName, instrument.BaseAssetAddress, instrument.BaseAssetSubID)
+	
 	// Create signed action
+	signerEOA := auth.GetAddress()
+	log.Printf("[Derive Order] Creating action - Owner: %s (Derive wallet), Signer: %s (EOA)", deriveWalletAddress, signerEOA)
+	
 	action := &DeriveAction{
 		SubaccountID:       subaccountID,
-		Owner:              deriveWalletAddress,
-		Signer:             auth.GetAddress(),
+		Owner:              deriveWalletAddress, // Derive wallet is the owner!
+		Signer:             signerEOA,            // EOA is the signer
 		SignatureExpirySec: time.Now().Unix() + 3600, // 1 hour
 		Nonce:              uint64(time.Now().UnixMilli())*1000 + 1,
-		ModuleAddress:      "0x87F2863866D85E3192a35A73b388BD625D83f2be", // Trade module
+		ModuleAddress:      "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b", // Trade module
 		AssetAddress:       instrument.BaseAssetAddress,
 		SubID:              instrument.BaseAssetSubID,
-		LimitPrice:         int64(price * 1e18),
-		Amount:             int64(amount * 1e18),
-		MaxFee:             int64(1e18), // 1 USDC max fee
+		// Convert price and amount to big.Int properly to avoid overflow
+		LimitPrice:         func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(price), big.NewFloat(1e18)).Int(nil); return v }(),
+		Amount:             func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(amount), big.NewFloat(1e18)).Int(nil); return v }(),
+		MaxFee:             new(big.Int).Mul(big.NewInt(1000), big.NewInt(1e18)), // 1000 USDC max fee (matching Python SDK)
 		RecipientID:        subaccountID,
 		IsBid:              side == "buy",
 	}
+	
+	log.Printf("[Derive Order] Action details before signing:")
+	log.Printf("  SubaccountID: %d", action.SubaccountID)
+	log.Printf("  Owner: %s", action.Owner)
+	log.Printf("  Signer: %s", action.Signer)
+	log.Printf("  Nonce: %d", action.Nonce)
+	log.Printf("  LimitPrice: %s", action.LimitPrice.String())
+	log.Printf("  Amount: %s", action.Amount.String())
+	log.Printf("  MaxFee: %s", action.MaxFee.String())
+	log.Printf("  IsBid: %v", action.IsBid)
 	
 	if err := action.Sign(auth.privateKey); err != nil {
 		return nil, err
@@ -205,41 +236,35 @@ func PlaceDeriveOrder(instrumentName string, side string, orderType string, pric
 		"signature":          action.Signature,
 		"limit_price":        fmt.Sprintf("%.6f", price),
 		"amount":             fmt.Sprintf("%.6f", amount),
-		"max_fee":            "1000",
+		"max_fee":            "1000", // Must match what we signed (1000 USDC)
 	}
 	
-	jsonData, err := json.Marshal(orderReq)
+	// Submit order via WebSocket
+	orderResp, err := wsClient.SubmitOrder(orderReq)
 	if err != nil {
 		return nil, err
 	}
 	
-	req, err := http.NewRequest("POST", "https://api.lyra.finance/private/order", bytes.NewBuffer(jsonData))
+	// Query open orders to verify
+	openOrders, err := wsClient.GetOpenOrders(subaccountID)
 	if err != nil {
-		return nil, err
+		log.Printf("[Derive Order] Failed to query open orders: %v", err)
+	} else {
+		log.Printf("[Derive Order] Open orders after submission: %d orders", len(openOrders))
+		for i, order := range openOrders {
+			if instrumentName, ok := order["instrument_name"].(string); ok {
+				if side, ok := order["direction"].(string); ok {
+					if amount, ok := order["amount"].(float64); ok {
+						if price, ok := order["price"].(float64); ok {
+							log.Printf("[Derive Order] Order %d: %s %s %.4f @ %.2f", i+1, instrumentName, side, amount, price)
+						}
+					}
+				}
+			}
+		}
 	}
 	
-	req.Header.Set("Content-Type", "application/json")
-	authHeaders, _ := auth.GetAuthHeaders(deriveWalletAddress)
-	for k, v := range authHeaders {
-		req.Header.Set(k, v)
-	}
-	
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	
-	body, _ := ioutil.ReadAll(resp.Body)
-	log.Printf("[Derive Order] Response: %s", string(body))
-	
-	var orderResp DeriveOrderResponse
-	json.Unmarshal(body, &orderResp)
-	if orderResp.Error != nil {
-		return nil, fmt.Errorf("API error: %s", orderResp.Error.Message)
-	}
-	
-	return &orderResp, nil
+	return orderResp, nil
 }
 
 // FetchDeriveInstrumentDetails fetches instrument details from Derive API
