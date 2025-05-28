@@ -237,17 +237,36 @@ type MarketCache interface {
 }
 ```
 
-### Current Implementation
-- **FileMarketCache**: JSON files with TTL metadata
+### Implementations
+
+#### FileMarketCache
+- JSON files with TTL metadata
 - Cache directory: `./cache/`
 - Default TTL: 1 hour
 - Automatic expiration checking
 
+#### ValkeyMarketCache
+- Redis-compatible Valkey backend
+- Supports distributed caching
+- Built-in TTL management
+- Ideal for multi-service deployments
+
+### Switching Between Caches
+You can switch between file and Valkey cache with a single line change:
+
+```go
+// File cache (current)
+cache, _ := NewFileMarketCache("./cache")
+
+// Valkey cache (new)
+cache, _ := NewValkeyMarketCache("localhost:6379")
+```
+
 ### Benefits
 - Reduces API calls during startup
 - Improves resilience to API failures
-- Easy debugging (inspect JSON files)
-- Simple migration path to Redis/memcached
+- Easy debugging (inspect JSON files with FileMarketCache)
+- Seamless scaling with Valkey for production deployments
 
 ## Future Enhancements
 
@@ -256,7 +275,7 @@ type MarketCache interface {
 3. **Smart Routing**: Choose best exchange based on liquidity/price
 4. **Unified Error Handling**: Standard error types across exchanges
 5. **Metrics Collection**: Track performance per exchange
-6. **Redis Cache**: For multi-service deployments
+6. ~~**Redis Cache**: For multi-service deployments~~ ✅ Implemented with Valkey
 7. **WebSocket Support**: Real-time market data updates
 
 ## Testing Strategy
