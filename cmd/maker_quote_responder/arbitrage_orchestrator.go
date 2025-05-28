@@ -134,12 +134,15 @@ func (o *ArbitrageOrchestrator) SubmitRFQTrade(rfq RFQResult) (*TradeEvent, erro
 
 // SubmitManualTrade handles manually initiated trades
 func (o *ArbitrageOrchestrator) SubmitManualTrade(req ManualTradeRequest) (*TradeEvent, error) {
+	// Convert strike to wei format (multiply by 10^8) for consistency with RFQ trades
+	strikeInWei := req.Strike.Mul(decimal.NewFromInt(100000000))
+	
 	trade := TradeEvent{
 		ID:         uuid.New().String(),
 		Source:     TradeSourceManual,
 		Status:     TradeStatusPending,
 		Instrument: req.Instrument,
-		Strike:     req.Strike,
+		Strike:     strikeInWei,
 		Expiry:     req.Expiry,
 		IsPut:      req.IsPut,
 		Quantity:   req.Quantity,

@@ -99,9 +99,9 @@ func (d *DeribitExchangeEd25519) GetOrderBook(req RFQResult, asset string) (CCXT
 	return d.DeribitExchange.GetOrderBook(req, asset)
 }
 
-func (d *DeribitExchangeEd25519) PlaceHedgeOrder(conf RFQConfirmation, underlying string, cfg *AppConfig) error {
+func (d *DeribitExchangeEd25519) PlaceHedgeOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
 	if err := d.refreshTokenIfNeeded(); err != nil {
 		return err
 	}
-	return d.DeribitExchange.PlaceHedgeOrder(conf, underlying, cfg)
+	return d.DeribitExchange.PlaceHedgeOrder(conf, instrument, cfg)
 }

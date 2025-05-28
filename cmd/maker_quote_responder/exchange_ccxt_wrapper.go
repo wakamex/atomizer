@@ -308,12 +308,10 @@ func (d *CCXTDeriveExchange) GetOrderBook(req RFQResult, asset string) (CCXTOrde
 }
 
 // PlaceHedgeOrder places a hedge order on Derive
-func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, underlying string, cfg *AppConfig) error {
-	// Convert to instrument
-	instrument, err := d.ConvertToInstrument(underlying, conf.Strike, int64(conf.Expiry), conf.IsPut)
-	if err != nil {
-		return fmt.Errorf("failed to convert instrument: %w", err)
-	}
+func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
+	// The instrument parameter is already in the correct format (e.g., "ETH-20250529-2550-C")
+	// No need to convert again
+	log.Printf("[Derive] PlaceHedgeOrder: instrument=%s", instrument)
 	
 	// Convert quantity from wei
 	quantityFloat, err := strconv.ParseFloat(conf.Quantity, 64)
@@ -381,6 +379,12 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, underlying st
 		log.Printf("[Hedge] ⚠️  WARNING: Hedge price seems very high: %f", hedgePrice)
 	}
 	
+	// Extract underlying from instrument (e.g., "ETH" from "ETH-20250529-2550-C")
+	underlying := "ETH"
+	if parts := strings.Split(instrument, "-"); len(parts) > 0 {
+		underlying = parts[0]
+	}
+	
 	log.Printf("[Hedge] Derive best ask: %f, placing at: %f (2x)", bestAsk, hedgePrice)
 	log.Printf("[Hedge] Order details - Symbol: %s, Quantity: %f %s, Price: %f USDC", 
 		symbol, quantity, underlying, hedgePrice)
@@ -430,7 +434,7 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, underlying st
 	log.Printf("[Hedge] Order ID: %s", order.Id)
 	log.Printf("[Hedge] Symbol: %s", symbol)
 	log.Printf("[Hedge] Side: SELL")
-	log.Printf("[Hedge] Quantity: %f %s", quantity, underlying)
+	log.Printf("[Hedge] Quantity: %f", quantity)
 	log.Printf("[Hedge] Price: %f USDC (2x best ask of %f)", hedgePrice, bestAsk)
 	log.Printf("[Hedge] Status: %s", order.Status)
 	
@@ -439,10 +443,13 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, underlying st
 
 // ConvertToInstrument converts option details to Derive format
 func (d *CCXTDeriveExchange) ConvertToInstrument(asset string, strike string, expiry int64, isPut bool) (string, error) {
+	// Log the incoming strike for debugging
+	log.Printf("[Derive] ConvertToInstrument: strike=%s, asset=%s, expiry=%d", strike, asset, expiry)
+	
 	// Convert strike from wei
 	strikeBigInt, ok := new(big.Int).SetString(strike, 10)
 	if !ok {
-		return "", fmt.Errorf("invalid strike")
+		return "", fmt.Errorf("invalid strike: %s", strike)
 	}
 	strikeNum := strikeBigInt.Div(strikeBigInt, new(big.Int).SetUint64(1e8)).String()
 	

@@ -113,12 +113,9 @@ func (d *DeribitExchange) GetOrderBook(req RFQResult, asset string) (CCXTOrderBo
 
 // PlaceHedgeOrder places a hedge order on Deribit
 // Since Rysk users are always selling calls (we buy from them), we hedge by selling calls on Deribit
-func (d *DeribitExchange) PlaceHedgeOrder(conf RFQConfirmation, underlying string, cfg *AppConfig) error {
-	// Convert option details to Deribit instrument name
-	instrument, err := d.ConvertToInstrument(underlying, conf.Strike, int64(conf.Expiry), conf.IsPut)
-	if err != nil {
-		return fmt.Errorf("failed to convert option details: %w", err)
-	}
+func (d *DeribitExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
+	// The instrument parameter is already in the correct format
+	// No need to convert again
 
 	// Convert quantity from wei to decimal
 	quantityFloat, err := strconv.ParseFloat(conf.Quantity, 64)
@@ -127,6 +124,12 @@ func (d *DeribitExchange) PlaceHedgeOrder(conf RFQConfirmation, underlying strin
 	}
 	quantityETH := quantityFloat / math.Pow(10, 18) // Convert from wei to ETH
 
+	// Extract underlying from instrument (e.g., "ETH" from "ETH-25DEC24-2200-C")
+	underlying := "ETH"
+	if parts := strings.Split(instrument, "-"); len(parts) > 0 {
+		underlying = parts[0]
+	}
+	
 	// Prepare symbol for order book and order placement
 	ccxtSymbol := fmt.Sprintf("%s/USD:%s", underlying, instrument)
 	

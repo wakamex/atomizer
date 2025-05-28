@@ -50,7 +50,7 @@ func (hm *HedgeManager) ExecuteHedge(trade *TradeEvent) (*HedgeResult, error) {
 	}
 	
 	// Get current order book
-	orderBook, err := hm.getOrderBookWithRetry(hedgeParams.instrument)
+	orderBook, err := hm.getOrderBookWithRetry(trade)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get order book: %w", err)
 	}
@@ -103,6 +103,10 @@ func (hm *HedgeManager) convertInstrumentName(trade *TradeEvent) (string, error)
 	// Extract components from trade
 	underlying := hm.extractUnderlying(trade.Instrument)
 	
+	// Log the strike value being passed
+	log.Printf("[HedgeManager] Converting instrument with strike: %s (decimal: %s)", 
+		trade.Strike.String(), trade.Strike.String())
+	
 	// Use exchange's conversion method
 	instrument, err := hm.exchange.ConvertToInstrument(
 		underlying,
@@ -128,17 +132,20 @@ func (hm *HedgeManager) extractUnderlying(instrument string) string {
 }
 
 // getOrderBookWithRetry fetches order book with retry logic
-func (hm *HedgeManager) getOrderBookWithRetry(instrument string) (CCXTOrderBook, error) {
-	// Create a mock RFQ for the order book request
-	mockRFQ := RFQResult{
-		Strike: "0", // These will be extracted from instrument
-		Expiry: 0,
-		IsPut:  false,
+func (hm *HedgeManager) getOrderBookWithRetry(trade *TradeEvent) (CCXTOrderBook, error) {
+	// Extract underlying asset from instrument name (e.g., "ETH" from "ETH-20250529-2550-C")
+	underlying := hm.extractUnderlying(trade.Instrument)
+	
+	// Create RFQ with actual trade values for the order book request
+	rfq := RFQResult{
+		Strike: trade.Strike.String(), // Pass actual strike in wei
+		Expiry: trade.Expiry,
+		IsPut:  trade.IsPut,
 	}
 	
 	var lastErr error
 	for i := 0; i < 3; i++ {
-		orderBook, err := hm.exchange.GetOrderBook(mockRFQ, instrument)
+		orderBook, err := hm.exchange.GetOrderBook(rfq, underlying)
 		if err == nil {
 			return orderBook, nil
 		}
