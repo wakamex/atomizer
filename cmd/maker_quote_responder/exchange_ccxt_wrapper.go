@@ -391,7 +391,26 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 		bestAsk = *ticker.Ask
 	}
 	
-	hedgePrice := bestAsk * 2.0
+	// Calculate hedge price based on order side
+	var hedgePrice float64
+	if orderSide == "buy" {
+		// For buy orders, place slightly below ask to ensure fill
+		hedgePrice = bestAsk * 0.999
+		
+		// Also check bandwidth limits for buy orders
+		// If our price exceeds ~1.8x the best ask, it might be rejected
+		maxBuyPrice := bestAsk * 1.8
+		if hedgePrice > maxBuyPrice {
+			log.Printf("[Hedge] Buy price %f exceeds likely bandwidth, capping at %f", hedgePrice, maxBuyPrice)
+			hedgePrice = maxBuyPrice
+		}
+		
+		log.Printf("[Hedge] Buy order: best ask %f, placing at %f", bestAsk, hedgePrice)
+	} else {
+		// For sell orders, use defensive 2x ask strategy
+		hedgePrice = bestAsk * 2.0
+		log.Printf("[Hedge] Sell order: best ask %f, placing at %f (2x)", bestAsk, hedgePrice)
+	}
 	
 	// Sanity check - warn if price seems unusual
 	if bestAsk < 0.01 {
@@ -406,8 +425,6 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 	if parts := strings.Split(instrument, "-"); len(parts) > 0 {
 		underlying = parts[0]
 	}
-	
-	log.Printf("[Hedge] Derive best ask: %f, placing at: %f (2x)", bestAsk, hedgePrice)
 	log.Printf("[Hedge] Order details - Symbol: %s, Quantity: %f %s, Price: %f USDC", 
 		symbol, quantity, underlying, hedgePrice)
 	
@@ -457,7 +474,7 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 	log.Printf("[Hedge] Symbol: %s", symbol)
 	log.Printf("[Hedge] Side: %s", strings.ToUpper(orderSide))
 	log.Printf("[Hedge] Quantity: %f", quantity)
-	log.Printf("[Hedge] Price: %f USDC (2x best ask of %f)", hedgePrice, bestAsk)
+	log.Printf("[Hedge] Price: %f USDC", hedgePrice)
 	log.Printf("[Hedge] Status: %s", order.Status)
 	
 	return nil

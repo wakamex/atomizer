@@ -236,9 +236,18 @@ func (c *DeriveWSClient) SubmitOrder(order map[string]interface{}) (*DeriveOrder
 			Error *struct {
 				Code    int    `json:"code"`
 				Message string `json:"message"`
+				Data    *struct {
+					Limit     string `json:"limit"`
+					Bandwidth string `json:"bandwidth"`
+				} `json:"data"`
 			} `json:"error"`
 		}
 		if err := json.Unmarshal(resp, &errorCheck); err == nil && errorCheck.Error != nil {
+			// If we get price band error, include bandwidth info
+			if errorCheck.Error.Code == 11013 && errorCheck.Error.Data != nil {
+				return nil, fmt.Errorf("order error: %s (limit: %s, bandwidth: %s)", 
+					errorCheck.Error.Message, errorCheck.Error.Data.Limit, errorCheck.Error.Data.Bandwidth)
+			}
 			return nil, fmt.Errorf("order error: %s", errorCheck.Error.Message)
 		}
 		
