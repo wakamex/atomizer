@@ -242,6 +242,10 @@ func (s *HTTPServer) validateTradeRequest(req *ManualTradeRequest) error {
 		return fmt.Errorf("instrument is required")
 	}
 	
+	if req.Side != "buy" && req.Side != "sell" {
+		return fmt.Errorf("side must be 'buy' or 'sell'")
+	}
+	
 	if req.Quantity.IsZero() || req.Quantity.IsNegative() {
 		return fmt.Errorf("quantity must be positive")
 	}

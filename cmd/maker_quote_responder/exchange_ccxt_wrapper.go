@@ -318,11 +318,11 @@ func (d *CCXTDeriveExchange) GetOrderBook(req RFQResult, asset string) (CCXTOrde
 	}, nil
 }
 
-// PlaceHedgeOrder places a hedge order on Derive
-func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
+// PlaceOrder places an order on Derive
+func (d *CCXTDeriveExchange) PlaceOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
 	// The instrument parameter is already in the correct format (e.g., "ETH-20250529-2550-C")
 	// No need to convert again
-	log.Printf("[Derive] PlaceHedgeOrder: instrument=%s", instrument)
+	log.Printf("[Derive] PlaceOrder: instrument=%s", instrument)
 	
 	// Convert quantity from wei
 	quantityFloat, err := strconv.ParseFloat(conf.Quantity, 64)
@@ -332,15 +332,15 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 	quantity := quantityFloat / math.Pow(10, 18)
 	
 	// Determine order side based on IsTakerBuy
-	// IsTakerBuy is inverted in hedge manager, so:
-	// IsTakerBuy = true means we're selling (taker is buying from us)
-	// IsTakerBuy = false means we're buying (taker is selling to us)
+	// IsTakerBuy represents what the taker is doing:
+	// - true: taker is buying (we are selling)
+	// - false: taker is selling (we are buying)
 	orderSide := "buy"
 	if conf.IsTakerBuy {
 		orderSide = "sell"
 	}
 	
-	log.Printf("[Derive] PlaceHedgeOrder: side=%s, quantity=%f", orderSide, quantity)
+	log.Printf("[Derive] PlaceOrder: side=%s, quantity=%f", orderSide, quantity)
 	
 	// Convert to CCXT format for orders
 	ccxtSymbol := ""
@@ -391,25 +391,38 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 		bestAsk = *ticker.Ask
 	}
 	
-	// Calculate hedge price based on order side
+	// Calculate order price
 	var hedgePrice float64
-	if orderSide == "buy" {
-		// For buy orders, place slightly below ask to ensure fill
-		hedgePrice = bestAsk * 0.999
-		
-		// Also check bandwidth limits for buy orders
-		// If our price exceeds ~1.8x the best ask, it might be rejected
-		maxBuyPrice := bestAsk * 1.8
-		if hedgePrice > maxBuyPrice {
-			log.Printf("[Hedge] Buy price %f exceeds likely bandwidth, capping at %f", hedgePrice, maxBuyPrice)
-			hedgePrice = maxBuyPrice
+	
+	// Check if price is provided in confirmation (for manual trades)
+	if conf.Price != "" {
+		priceFloat, err := strconv.ParseFloat(conf.Price, 64)
+		if err == nil && priceFloat > 0 {
+			hedgePrice = priceFloat
+			log.Printf("[Order] Using manual price: %f", hedgePrice)
 		}
-		
-		log.Printf("[Hedge] Buy order: best ask %f, placing at %f", bestAsk, hedgePrice)
-	} else {
-		// For sell orders, use defensive 2x ask strategy
-		hedgePrice = bestAsk * 2.0
-		log.Printf("[Hedge] Sell order: best ask %f, placing at %f (2x)", bestAsk, hedgePrice)
+	}
+	
+	// If no price provided, calculate based on order side
+	if hedgePrice == 0 {
+		if orderSide == "buy" {
+			// For buy orders, place slightly below ask to ensure fill
+			hedgePrice = bestAsk * 0.999
+			
+			// Also check bandwidth limits for buy orders
+			// If our price exceeds ~1.8x the best ask, it might be rejected
+			maxBuyPrice := bestAsk * 1.8
+			if hedgePrice > maxBuyPrice {
+				log.Printf("[Hedge] Buy price %f exceeds likely bandwidth, capping at %f", hedgePrice, maxBuyPrice)
+				hedgePrice = maxBuyPrice
+			}
+			
+			log.Printf("[Hedge] Buy order: best ask %f, placing at %f", bestAsk, hedgePrice)
+		} else {
+			// For sell orders, use defensive 2x ask strategy
+			hedgePrice = bestAsk * 2.0
+			log.Printf("[Hedge] Sell order: best ask %f, placing at %f (2x)", bestAsk, hedgePrice)
+		}
 	}
 	
 	// Sanity check - warn if price seems unusual
@@ -425,8 +438,8 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 	if parts := strings.Split(instrument, "-"); len(parts) > 0 {
 		underlying = parts[0]
 	}
-	log.Printf("[Hedge] Order details - Symbol: %s, Quantity: %f %s, Price: %f USDC", 
-		symbol, quantity, underlying, hedgePrice)
+	log.Printf("[Order] Details - Symbol: %s, Side: %s, Quantity: %f %s, Price: %f USDC", 
+		symbol, strings.ToUpper(orderSide), quantity, underlying, hedgePrice)
 	
 	// Place order
 	order, err := d.exchange.CreateOrder(

@@ -7,8 +7,8 @@ type Exchange interface {
 	// GetOrderBook fetches the order book for a given option
 	GetOrderBook(req RFQResult, asset string) (CCXTOrderBook, error)
 	
-	// PlaceHedgeOrder places a hedge order on the exchange
-	PlaceHedgeOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error
+	// PlaceOrder places an order on the exchange
+	PlaceOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error
 	
 	// ConvertToInstrument converts option details to exchange-specific instrument format
 	ConvertToInstrument(asset string, strike string, expiry int64, isPut bool) (string, error)

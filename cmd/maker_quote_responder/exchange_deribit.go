@@ -111,9 +111,8 @@ func (d *DeribitExchange) GetOrderBook(req RFQResult, asset string) (CCXTOrderBo
 	return book, nil
 }
 
-// PlaceHedgeOrder places a hedge order on Deribit
-// Since Rysk users are always selling calls (we buy from them), we hedge by selling calls on Deribit
-func (d *DeribitExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
+// PlaceOrder places an order on Deribit
+func (d *DeribitExchange) PlaceOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
 	// The instrument parameter is already in the correct format
 	// No need to convert again
 

@@ -158,7 +158,7 @@ func (m *MockExchange) GetOrderBook(req RFQResult, asset string) (CCXTOrderBook,
 	}, nil
 }
 
-func (m *MockExchange) PlaceHedgeOrder(conf RFQConfirmation, underlying string, cfg *AppConfig) error {
+func (m *MockExchange) PlaceOrder(conf RFQConfirmation, underlying string, cfg *AppConfig) error {
 	return nil
 }
 

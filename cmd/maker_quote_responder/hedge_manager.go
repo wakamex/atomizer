@@ -196,7 +196,7 @@ func (hm *HedgeManager) executeSingleHedge(params *hedgeParams, price decimal.De
 	}
 	
 	// Place hedge order
-	err := hm.exchange.PlaceHedgeOrder(confirmation, params.instrument, hm.config)
+	err := hm.exchange.PlaceOrder(confirmation, params.instrument, hm.config)
 	if err != nil {
 		return nil, err
 	}

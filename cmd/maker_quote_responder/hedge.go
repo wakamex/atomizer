@@ -9,7 +9,7 @@ import (
 // This is the legacy function - new code should use HedgeManager directly
 func HedgeOrder(conf RFQConfirmation, underlying string, cfg *AppConfig, exchange Exchange) error {
 	// Use the exchange interface to place the hedge order
-	err := exchange.PlaceHedgeOrder(conf, underlying, cfg)
+	err := exchange.PlaceOrder(conf, underlying, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to place hedge order on %s: %w", cfg.ExchangeName, err)
 	}

@@ -147,7 +147,7 @@ func (o *ArbitrageOrchestrator) SubmitManualTrade(req ManualTradeRequest) (*Trad
 		IsPut:      req.IsPut,
 		Quantity:   req.Quantity,
 		Price:      req.Price,
-		IsTakerBuy: true, // Manual trades: user (taker) buys from us (maker sells)
+		IsTakerBuy: req.Side == "sell", // For manual trades, invert: if we buy, taker (market) is selling to us
 		Timestamp:  time.Now(),
 	}
 	
@@ -203,11 +203,36 @@ func (o *ArbitrageOrchestrator) executeTrade(trade TradeEvent) {
 	// Update status
 	o.updateTradeStatus(trade.ID, TradeStatusExecuted)
 	
-	// For manual trades, we skip to hedging
-	// For RFQ trades, quote response and execution are handled by existing flow
-	
-	if trade.Source == TradeSourceManual || trade.Status == TradeStatusExecuted {
-		// Execute hedge
+	// Handle based on trade source
+	if trade.Source == TradeSourceManual {
+		// For manual trades, place the actual order on the exchange
+		log.Printf("Executing manual trade order on exchange")
+		
+		// Build order confirmation for exchange
+		confirmation := RFQConfirmation{
+			Nonce:      trade.ID,
+			Quantity:   trade.Quantity.Mul(decimal.New(1, 18)).String(), // Convert to wei
+			IsTakerBuy: trade.IsTakerBuy,
+			Strike:     trade.Strike.String(),
+			Expiry:     int(trade.Expiry),
+			IsPut:      trade.IsPut,
+			Price:      trade.Price.String(), // Use the manual trade's specified price
+		}
+		
+		// Place the order using hedge manager's exchange
+		err := o.hedgeManager.exchange.PlaceOrder(confirmation, trade.Instrument, o.config)
+		if err != nil {
+			log.Printf("Manual trade order failed for %s: %v", trade.ID, err)
+			o.updateTradeStatus(trade.ID, TradeStatusFailed)
+			o.updateTradeError(trade.ID, err)
+			return
+		}
+		
+		log.Printf("Manual trade order placed successfully for %s", trade.ID)
+		o.updateTradeStatus(trade.ID, TradeStatusExecuted)
+		
+	} else if trade.Status == TradeStatusExecuted {
+		// For RFQ trades that are executed, proceed with hedging
 		hedgeResult, err := o.hedgeManager.ExecuteHedge(&trade)
 		if err != nil {
 			log.Printf("Hedge failed for trade %s: %v", trade.ID, err)
@@ -320,4 +345,5 @@ type ManualTradeRequest struct {
 	IsPut      bool            `json:"is_put"`
 	Quantity   decimal.Decimal `json:"quantity"`
 	Price      decimal.Decimal `json:"price"`
+	Side       string          `json:"side"` // "buy" or "sell" - which side of the order book
 }
