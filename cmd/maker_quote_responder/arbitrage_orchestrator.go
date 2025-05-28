@@ -147,7 +147,7 @@ func (o *ArbitrageOrchestrator) SubmitManualTrade(req ManualTradeRequest) (*Trad
 		IsPut:      req.IsPut,
 		Quantity:   req.Quantity,
 		Price:      req.Price,
-		IsTakerBuy: false, // Manual trades are maker sells
+		IsTakerBuy: true, // Manual trades: user (taker) buys from us (maker sells)
 		Timestamp:  time.Now(),
 	}
 	
