@@ -24,6 +24,16 @@ type AppConfig struct {
 	AssetMapping              map[string]string // Maps asset addresses to underlying symbols (ETH, BTC, SOL)
 	ExchangeName              string            // Name of the exchange to use (e.g., "deribit", "okx", "bybit")
 	ExchangeTestMode          bool              // Whether to use the exchange's testnet
+	
+	// Arbitrage configuration
+	HTTPPort                  int               // Port for HTTP API server
+	MaxPositionSize           string            // Maximum position size per instrument
+	MaxDeltaExposure          string            // Maximum delta exposure
+	GammaHedgingEnabled       bool              // Enable gamma hedging
+	GammaMaxDelta             string            // Maximum delta for gamma hedging
+	EnableManualTrades        bool              // Enable manual trade API
+	CacheBackend              string            // Cache backend: "file" or "valkey"
+	ValkeyAddr                string            // Valkey server address
 }
 
 // LoadConfig parses command-line flags and environment variables
@@ -37,6 +47,14 @@ func LoadConfig() *AppConfig {
 	flag.Int64Var(&cfg.QuoteValidDurationSeconds, "quote_valid_duration_seconds", 30, "How long your quotes will be valid in seconds")
 	flag.StringVar(&cfg.ExchangeName, "exchange", "derive", "Exchange to use for hedging (e.g., derive, deribit, okx, bybit)")
 	flag.BoolVar(&cfg.ExchangeTestMode, "exchange_test_mode", false, "Use exchange testnet (true) or mainnet (false)")
+	
+	// Arbitrage flags
+	flag.IntVar(&cfg.HTTPPort, "http_port", 8080, "Port for HTTP API server")
+	flag.BoolVar(&cfg.EnableManualTrades, "enable_manual_trades", true, "Enable manual trade API")
+	flag.BoolVar(&cfg.GammaHedgingEnabled, "gamma_hedging", false, "Enable gamma hedging")
+	flag.StringVar(&cfg.CacheBackend, "cache_backend", "file", "Cache backend: file or valkey")
+	flag.StringVar(&cfg.ValkeyAddr, "valkey_addr", "localhost:6379", "Valkey server address")
+	
 	flag.Parse()
 
 	cfg.MakerAddress = os.Getenv("MAKER_ADDRESS")
@@ -93,6 +111,17 @@ func LoadConfig() *AppConfig {
 	}
 	
 	log.Printf("✓ Private key validation successful - derived address matches maker address: %s", cfg.MakerAddress)
+
+	// Load arbitrage configuration from environment
+	if maxPos := os.Getenv("MAX_POSITION_SIZE"); maxPos != "" {
+		cfg.MaxPositionSize = maxPos
+	}
+	if maxDelta := os.Getenv("MAX_DELTA_EXPOSURE"); maxDelta != "" {
+		cfg.MaxDeltaExposure = maxDelta
+	}
+	if gammaMaxDelta := os.Getenv("GAMMA_MAX_DELTA"); gammaMaxDelta != "" {
+		cfg.GammaMaxDelta = gammaMaxDelta
+	}
 
 	// Initialize asset mapping
 	// TODO: This should be configurable via environment variables or config file
