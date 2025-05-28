@@ -58,6 +58,9 @@ func (hm *HedgeManager) ExecuteHedge(trade *TradeEvent) (*HedgeResult, error) {
 	// Calculate hedge price within spread
 	hedgePrice := hm.calculateHedgePrice(orderBook, hedgeParams.isBuy)
 	
+	log.Printf("[HedgeManager] Hedge params - isBuy: %v, calculated price: %s", 
+		hedgeParams.isBuy, hedgePrice.String())
+	
 	// Execute hedge with retries
 	var lastErr error
 	for attempt := 1; attempt <= hm.maxRetries; attempt++ {

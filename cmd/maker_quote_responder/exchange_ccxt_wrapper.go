@@ -331,6 +331,17 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 	}
 	quantity := quantityFloat / math.Pow(10, 18)
 	
+	// Determine order side based on IsTakerBuy
+	// IsTakerBuy is inverted in hedge manager, so:
+	// IsTakerBuy = true means we're selling (taker is buying from us)
+	// IsTakerBuy = false means we're buying (taker is selling to us)
+	orderSide := "buy"
+	if conf.IsTakerBuy {
+		orderSide = "sell"
+	}
+	
+	log.Printf("[Derive] PlaceHedgeOrder: side=%s, quantity=%f", orderSide, quantity)
+	
 	// Convert to CCXT format for orders
 	ccxtSymbol := ""
 	if parts := strings.Split(instrument, "-"); len(parts) == 4 {
@@ -404,7 +415,7 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 	order, err := d.exchange.CreateOrder(
 		symbol,
 		"limit",
-		"sell",
+		orderSide,
 		quantity,
 		ccxt.WithCreateOrderPrice(hedgePrice),
 	)
@@ -418,7 +429,7 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 		subaccountIDStr := os.Getenv("DERIVE_SUBACCOUNT_ID")
 		if deriveWalletAddress == "" || subaccountIDStr == "" {
 			log.Printf("[Hedge] ⚠️  DERIVE_WALLET_ADDRESS or DERIVE_SUBACCOUNT_ID not set. Cannot place order.")
-			log.Printf("[Hedge] ⚠️  Order details: %s SELL %.4f @ %.2f USDC", instrument, quantity, hedgePrice)
+			log.Printf("[Hedge] ⚠️  Order details: %s %s %.4f @ %.2f USDC", instrument, strings.ToUpper(orderSide), quantity, hedgePrice)
 			return nil
 		}
 		
@@ -428,10 +439,10 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 			return nil
 		}
 		
-		orderResp, apiErr := d.placeDeriveOrderWithPersistentWS(instrument, "sell", "limit", hedgePrice, quantity, subaccountID)
+		orderResp, apiErr := d.placeDeriveOrderWithPersistentWS(instrument, orderSide, "limit", hedgePrice, quantity, subaccountID)
 		if apiErr != nil {
 			log.Printf("[Hedge] Direct API order failed: %v", apiErr)
-			log.Printf("[Hedge] ⚠️  Order details: %s SELL %.4f @ %.2f USDC", instrument, quantity, hedgePrice)
+			log.Printf("[Hedge] ⚠️  Order details: %s %s %.4f @ %.2f USDC", instrument, strings.ToUpper(orderSide), quantity, hedgePrice)
 			return nil
 		}
 		
@@ -444,7 +455,7 @@ func (d *CCXTDeriveExchange) PlaceHedgeOrder(conf RFQConfirmation, instrument st
 	log.Printf("[Hedge] ✅ Order placed successfully on Derive")
 	log.Printf("[Hedge] Order ID: %s", order.Id)
 	log.Printf("[Hedge] Symbol: %s", symbol)
-	log.Printf("[Hedge] Side: SELL")
+	log.Printf("[Hedge] Side: %s", strings.ToUpper(orderSide))
 	log.Printf("[Hedge] Quantity: %f", quantity)
 	log.Printf("[Hedge] Price: %f USDC (2x best ask of %f)", hedgePrice, bestAsk)
 	log.Printf("[Hedge] Status: %s", order.Status)
