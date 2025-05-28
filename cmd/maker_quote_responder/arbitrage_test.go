@@ -50,13 +50,13 @@ func TestArbitrageOrchestrator(t *testing.T) {
 
 	// Test RFQ trade submission
 	t.Run("RFQTradeSubmission", func(t *testing.T) {
-		rfq := RFQRequest{
-			RfqId:      "test-rfq-123",
+		rfq := RFQResult{
+			ID:         "test-rfq-123",
 			Strike:     NewBigInt(3000, 8),
 			Expiry:     NewBigInt(time.Now().Add(30*24*time.Hour).Unix(), 0),
 			IsPut:      false,
-			Size:       NewBigInt(1, 18), // 1 ETH in wei
-			IsBuyOrder: true,
+			Quantity:   NewBigInt(1, 18), // 1 ETH in wei
+			IsTakerBuy: true,
 		}
 
 		trade, err := orchestrator.SubmitRFQTrade(rfq)

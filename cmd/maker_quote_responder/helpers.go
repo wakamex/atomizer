@@ -21,3 +21,12 @@ func BigIntFromDecimal(value decimal.Decimal, exp int32) *big.Int {
 	result := value.Mul(multiplier)
 	return result.BigInt()
 }
+
+// DecimalFromString converts a string to decimal
+func DecimalFromString(value string) decimal.Decimal {
+	result, err := decimal.NewFromString(value)
+	if err != nil {
+		return decimal.Zero
+	}
+	return result
+}

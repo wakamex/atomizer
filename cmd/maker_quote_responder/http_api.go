@@ -6,8 +6,6 @@ import (
 	"log"
 	"net/http"
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 // HTTPServer provides REST API for manual operations

@@ -176,9 +176,9 @@ func (hm *HedgeManager) calculateHedgePrice(orderBook CCXTOrderBook, isBuy bool)
 func (hm *HedgeManager) executeSingleHedge(params *hedgeParams, price decimal.Decimal) (*HedgeResult, error) {
 	// Build confirmation for exchange
 	confirmation := RFQConfirmation{
-		RfqId:      params.tradeID,
-		Size:       params.quantity.Mul(decimal.New(1, 18)).BigInt(), // Convert to wei
-		IsBuyOrder: params.isBuy,
+		Nonce:      params.tradeID,
+		Quantity:   params.quantity.Mul(decimal.New(1, 18)).String(), // Convert to wei
+		IsTakerBuy: !params.isBuy, // Invert because we're hedging
 		// Other fields would be populated from trade details
 	}
 	

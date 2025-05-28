@@ -1,4 +1,4 @@
-package algo
+package main
 
 import (
 	"context"
@@ -80,8 +80,8 @@ type OrderbookData struct {
 	Asks [][]decimal.Decimal // [price, amount]
 }
 
-// Position represents a trading position
-type Position struct {
+// GammaPosition represents a trading position for gamma hedging
+type GammaPosition struct {
 	InstrumentName string
 	Amount         decimal.Decimal
 }
@@ -101,12 +101,12 @@ type OrderArgs struct {
 type MarketData interface {
 	GetTicker(instrumentName string) (*TickerData, error)
 	GetOrderbookExcludeMyOrders(instrumentName string) (*OrderbookData, error)
-	GetOrders(instrumentName string) []Order
-	IterPositions() []Position
+	GetOrders(instrumentName string) []GammaOrder
+	IterPositions() []GammaPosition
 }
 
-// Order represents an order
-type Order struct {
+// GammaOrder represents an order for gamma hedging
+type GammaOrder struct {
 	OrderID   string
 	Direction Direction
 	Price     decimal.Decimal
@@ -290,7 +290,7 @@ func (a *GammaDDHAlgo) GetVariablePct(expiry int64) decimal.Decimal {
 }
 
 // FilterOpenIDs filters open orders by direction
-func FilterOpenIDs(orders []Order, direction Direction) []OrderInfo {
+func FilterOpenIDs(orders []GammaOrder, direction Direction) []OrderInfo {
 	var result []OrderInfo
 	for _, order := range orders {
 		if order.Direction == direction && order.Status == "open" {

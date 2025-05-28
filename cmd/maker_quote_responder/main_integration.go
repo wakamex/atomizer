@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 )
 
@@ -25,8 +24,8 @@ func InitializeArbitrageSystem(cfg *AppConfig, exchange Exchange) (*ArbitrageOrc
 }
 
 // IntegrateWithRFQFlow modifies the RFQ processing to use the orchestrator
-func IntegrateWithRFQFlow(orchestrator *ArbitrageOrchestrator) func(RFQRequest) {
-	return func(rfq RFQRequest) {
+func IntegrateWithRFQFlow(orchestrator *ArbitrageOrchestrator) func(RFQResult) {
+	return func(rfq RFQResult) {
 		// Submit RFQ to orchestrator for tracking
 		trade, err := orchestrator.SubmitRFQTrade(rfq)
 		if err != nil {
@@ -34,7 +33,7 @@ func IntegrateWithRFQFlow(orchestrator *ArbitrageOrchestrator) func(RFQRequest) 
 			return
 		}
 		
-		log.Printf("RFQ %s submitted to orchestrator as trade %s", rfq.RfqId, trade.ID)
+		log.Printf("RFQ %s submitted to orchestrator as trade %s", rfq.ID, trade.ID)
 	}
 }
 

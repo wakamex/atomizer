@@ -23,9 +23,9 @@ func HedgeOrderWithManager(conf RFQConfirmation, underlying string, cfg *AppConf
 	// Convert confirmation to TradeEvent
 	trade := &TradeEvent{
 		ID:         conf.QuoteNonce,
-		RFQId:      conf.RfqId,
-		IsTakerBuy: conf.IsBuyOrder,
-		Quantity:   DecimalFromBigInt(conf.Size, -18), // Convert from wei
+		RFQId:      conf.Nonce,
+		IsTakerBuy: conf.IsTakerBuy,
+		Quantity:   DecimalFromString(conf.Quantity), // Already in correct format
 		// Other fields would be populated from the original RFQ
 	}
 	

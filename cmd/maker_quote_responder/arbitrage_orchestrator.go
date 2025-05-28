@@ -101,18 +101,18 @@ func (o *ArbitrageOrchestrator) Stop() {
 }
 
 // SubmitRFQTrade converts an RFQ into a trade event
-func (o *ArbitrageOrchestrator) SubmitRFQTrade(rfq RFQRequest) (*TradeEvent, error) {
+func (o *ArbitrageOrchestrator) SubmitRFQTrade(rfq RFQResult) (*TradeEvent, error) {
 	trade := TradeEvent{
 		ID:         uuid.New().String(),
 		Source:     TradeSourceRysk,
 		Status:     TradeStatusPending,
-		RFQId:      rfq.RfqId,
+		RFQId:      rfq.ID,
 		Instrument: o.buildInstrumentName(rfq),
-		Strike:     decimal.NewFromBigInt(rfq.Strike, 0),
-		Expiry:     rfq.Expiry.Int64(),
+		Strike:     DecimalFromString(rfq.Strike),
+		Expiry:     rfq.Expiry,
 		IsPut:      rfq.IsPut,
-		Quantity:   decimal.NewFromBigInt(rfq.Size, -18), // Convert from wei
-		IsTakerBuy: rfq.IsBuyOrder,
+		Quantity:   DecimalFromString(rfq.Quantity).Div(decimal.New(1, 18)), // Convert from wei
+		IsTakerBuy: rfq.IsTakerBuy,
 		Timestamp:  time.Now(),
 	}
 	
@@ -222,7 +222,7 @@ func (o *ArbitrageOrchestrator) OnRFQConfirmation(conf RFQConfirmation) {
 	o.mu.RLock()
 	var trade *TradeEvent
 	for _, t := range o.activeTrades {
-		if t.RFQId == conf.RfqId {
+		if t.RFQId == conf.Nonce {
 			trade = t
 			break
 		}
@@ -230,7 +230,7 @@ func (o *ArbitrageOrchestrator) OnRFQConfirmation(conf RFQConfirmation) {
 	o.mu.RUnlock()
 	
 	if trade == nil {
-		log.Printf("No trade found for RFQ confirmation %s", conf.RfqId)
+		log.Printf("No trade found for RFQ confirmation %s", conf.Nonce)
 		return
 	}
 	
@@ -278,11 +278,11 @@ func (o *ArbitrageOrchestrator) updateTradeError(tradeID string, err error) {
 	}
 }
 
-func (o *ArbitrageOrchestrator) buildInstrumentName(rfq RFQRequest) string {
+func (o *ArbitrageOrchestrator) buildInstrumentName(rfq RFQResult) string {
 	// Convert to exchange instrument format
 	// This is a simplified version - actual implementation would use exchange methods
-	strikeStr := decimal.NewFromBigInt(rfq.Strike, -8).String()
-	expiryTime := time.Unix(rfq.Expiry.Int64(), 0)
+	strikeStr := DecimalFromString(rfq.Strike).Div(decimal.New(1, 8)).String()
+	expiryTime := time.Unix(rfq.Expiry, 0)
 	optionType := "C"
 	if rfq.IsPut {
 		optionType = "P"
