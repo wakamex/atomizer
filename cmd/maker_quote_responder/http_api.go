@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,7 @@ type HTTPServer struct {
 	orchestrator *ArbitrageOrchestrator
 	riskManager  *RiskManager
 	port         int
+	server       *http.Server
 }
 
 // NewHTTPServer creates a new HTTP server
@@ -45,14 +47,14 @@ func (s *HTTPServer) Start() error {
 	addr := fmt.Sprintf(":%d", s.port)
 	log.Printf("Starting HTTP server on %s", addr)
 	
-	server := &http.Server{
+	s.server = &http.Server{
 		Addr:         addr,
 		Handler:      s.corsMiddleware(mux),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
 	
-	return server.ListenAndServe()
+	return s.server.ListenAndServe()
 }
 
 // CORS middleware
@@ -264,18 +266,13 @@ func (s *HTTPServer) validateTradeRequest(req *ManualTradeRequest) error {
 	return nil
 }
 
-// StartHTTPServer starts the HTTP API server
-func StartHTTPServer(orchestrator *ArbitrageOrchestrator, riskManager *RiskManager, config *AppConfig) {
-	port := 8080 // Default port
-	if config.HTTPPort > 0 {
-		port = config.HTTPPort
+// Stop gracefully stops the HTTP server
+func (s *HTTPServer) Stop() error {
+	if s.server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return s.server.Shutdown(ctx)
 	}
-	
-	server := NewHTTPServer(orchestrator, riskManager, port)
-	
-	go func() {
-		if err := server.Start(); err != nil {
-			log.Printf("HTTP server error: %v", err)
-		}
-	}()
+	return nil
 }
+

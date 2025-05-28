@@ -31,6 +31,7 @@ const (
 	TradeStatusCancelled TradeStatus = "CANCELLED"
 )
 
+
 // TradeEvent represents a unified trade across all sources
 type TradeEvent struct {
 	ID              string
@@ -55,7 +56,7 @@ type ArbitrageOrchestrator struct {
 	config         *AppConfig
 	hedgeManager   *HedgeManager
 	riskManager    *RiskManager
-	gammaModule    *GammaModule
+	gammaModule    *GammaDDHAlgo
 	tradeQueue     chan TradeEvent
 	activeTrades   map[string]*TradeEvent
 	mu             sync.RWMutex
@@ -71,7 +72,7 @@ func NewArbitrageOrchestrator(cfg *AppConfig, exchange Exchange) *ArbitrageOrche
 		config:       cfg,
 		hedgeManager: NewHedgeManager(exchange, cfg),
 		riskManager:  NewRiskManager(cfg),
-		gammaModule:  NewGammaModule(cfg),
+		gammaModule:  NewGammaDDHAlgo(exchange, cfg.GammaThreshold),
 		tradeQueue:   make(chan TradeEvent, 100),
 		activeTrades: make(map[string]*TradeEvent),
 		ctx:          ctx,
@@ -87,7 +88,7 @@ func (o *ArbitrageOrchestrator) Start() error {
 	go o.processTradeQueue()
 	
 	// Start gamma hedging if enabled
-	if o.config.GammaHedgingEnabled {
+	if o.config.EnableGammaHedging {
 		go o.gammaModule.Start(o.ctx)
 	}
 	
@@ -170,6 +171,17 @@ func (o *ArbitrageOrchestrator) SubmitManualTrade(req ManualTradeRequest) (*Trad
 }
 
 // processTradeQueue handles trades asynchronously
+// HandleManualTrade handles a manually submitted trade
+func (o *ArbitrageOrchestrator) HandleManualTrade(trade *TradeEvent) error {
+	select {
+	case o.tradeQueue <- *trade:
+		log.Printf("Manual trade %s queued for processing", trade.ID)
+		return nil
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("failed to queue trade %s: timeout", trade.ID)
+	}
+}
+
 func (o *ArbitrageOrchestrator) processTradeQueue() {
 	for {
 		select {
@@ -212,7 +224,9 @@ func (o *ArbitrageOrchestrator) executeTrade(trade TradeEvent) {
 		o.updateTradeStatus(trade.ID, TradeStatusHedged)
 		
 		// Notify gamma module of new position
-		o.gammaModule.OnNewPosition(&trade)
+		if o.gammaModule != nil {
+			o.gammaModule.OnNewPosition(trade.Instrument, trade.Quantity, trade.Price)
+		}
 	}
 }
 

@@ -26,11 +26,11 @@ type AppConfig struct {
 	ExchangeTestMode          bool              // Whether to use the exchange's testnet
 	
 	// Arbitrage configuration
-	HTTPPort                  int               // Port for HTTP API server
-	MaxPositionSize           string            // Maximum position size per instrument
-	MaxDeltaExposure          string            // Maximum delta exposure
-	GammaHedgingEnabled       bool              // Enable gamma hedging
-	GammaMaxDelta             string            // Maximum delta for gamma hedging
+	HTTPPort                  string            // Port for HTTP API server
+	MaxPositionDelta          float64           // Maximum position delta exposure
+	MinLiquidityScore         float64           // Minimum liquidity score for trades
+	EnableGammaHedging        bool              // Enable gamma hedging
+	GammaThreshold            float64           // Gamma threshold for hedging
 	EnableManualTrades        bool              // Enable manual trade API
 	CacheBackend              string            // Cache backend: "file" or "valkey"
 	ValkeyAddr                string            // Valkey server address
@@ -49,9 +49,12 @@ func LoadConfig() *AppConfig {
 	flag.BoolVar(&cfg.ExchangeTestMode, "exchange_test_mode", false, "Use exchange testnet (true) or mainnet (false)")
 	
 	// Arbitrage flags
-	flag.IntVar(&cfg.HTTPPort, "http_port", 8080, "Port for HTTP API server")
+	flag.StringVar(&cfg.HTTPPort, "http_port", "8080", "Port for HTTP API server")
+	flag.Float64Var(&cfg.MaxPositionDelta, "max_position_delta", 10.0, "Maximum position delta exposure")
+	flag.Float64Var(&cfg.MinLiquidityScore, "min_liquidity_score", 0.001, "Minimum liquidity score for trades")
 	flag.BoolVar(&cfg.EnableManualTrades, "enable_manual_trades", true, "Enable manual trade API")
-	flag.BoolVar(&cfg.GammaHedgingEnabled, "gamma_hedging", false, "Enable gamma hedging")
+	flag.BoolVar(&cfg.EnableGammaHedging, "enable_gamma_hedging", false, "Enable gamma hedging")
+	flag.Float64Var(&cfg.GammaThreshold, "gamma_threshold", 0.1, "Gamma threshold for hedging")
 	flag.StringVar(&cfg.CacheBackend, "cache_backend", "file", "Cache backend: file or valkey")
 	flag.StringVar(&cfg.ValkeyAddr, "valkey_addr", "localhost:6379", "Valkey server address")
 	
@@ -81,10 +84,13 @@ func LoadConfig() *AppConfig {
 		// Only require standard API credentials if asymmetric auth is not available
 		if asymmetricPrivateKey == "" || deribitClientId == "" {
 			if cfg.DeribitApiKey == "" {
-				log.Fatal("Error: DERIBIT_API_KEY environment variable is not set or empty (or provide ASYMMETRIC_PRIVATE_KEY and DERIBIT_CLIENT_ID).")
-			}
-			if cfg.DeribitApiSecret == "" {
-				log.Fatal("Error: DERIBIT_API_SECRET environment variable is not set or empty (or provide ASYMMETRIC_PRIVATE_KEY and DERIBIT_CLIENT_ID).")
+				log.Printf("Warning: DERIBIT_API_KEY not set. Deribit exchange will not be available.")
+				log.Printf("To use Deribit, set DERIBIT_API_KEY and DERIBIT_API_SECRET, or ASYMMETRIC_PRIVATE_KEY and DERIBIT_CLIENT_ID.")
+				// Change to a different exchange if Deribit credentials are not available
+				cfg.ExchangeName = "derive"
+				log.Printf("Switching to Derive exchange instead.")
+			} else if cfg.DeribitApiSecret == "" {
+				log.Fatal("Error: DERIBIT_API_SECRET environment variable is not set or empty.")
 			}
 		}
 	}
@@ -113,15 +119,7 @@ func LoadConfig() *AppConfig {
 	log.Printf("✓ Private key validation successful - derived address matches maker address: %s", cfg.MakerAddress)
 
 	// Load arbitrage configuration from environment
-	if maxPos := os.Getenv("MAX_POSITION_SIZE"); maxPos != "" {
-		cfg.MaxPositionSize = maxPos
-	}
-	if maxDelta := os.Getenv("MAX_DELTA_EXPOSURE"); maxDelta != "" {
-		cfg.MaxDeltaExposure = maxDelta
-	}
-	if gammaMaxDelta := os.Getenv("GAMMA_MAX_DELTA"); gammaMaxDelta != "" {
-		cfg.GammaMaxDelta = gammaMaxDelta
-	}
+	// These can override command-line flags if needed
 
 	// Initialize asset mapping
 	// TODO: This should be configurable via environment variables or config file

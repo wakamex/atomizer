@@ -16,8 +16,8 @@ func InitializeArbitrageSystem(cfg *AppConfig, exchange Exchange) (*ArbitrageOrc
 	
 	// Start HTTP API if enabled
 	if cfg.EnableManualTrades {
-		StartHTTPServer(orchestrator, orchestrator.riskManager, cfg)
-		log.Printf("HTTP API server started on port %d", cfg.HTTPPort)
+		// HTTP server is now started in main.go
+		log.Printf("Manual trades enabled via HTTP API")
 	}
 	
 	return orchestrator, nil

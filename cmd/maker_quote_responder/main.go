@@ -7,13 +7,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/wakamex/rysk-v12-cli/ryskcore" // Re-add ryskcore for type definitions if needed, or ensure types are fully self-contained elsewhere
 )
 
@@ -81,9 +84,35 @@ func main() {
 		log.Printf("Successfully initialized %s exchange in PRODUCTION MODE", cfg.ExchangeName)
 	}
 
+	// Create orchestrator
+	orchestrator := NewArbitrageOrchestrator(cfg, exchange)
+	
+	// Start the orchestrator
+	go orchestrator.Start()
+	
+	// Create and start HTTP server for manual trades
+	httpPort := 8080 // Default port
+	if cfg.HTTPPort != "" {
+		// Parse port from string
+		if port, err := strconv.Atoi(cfg.HTTPPort); err == nil {
+			httpPort = port
+		}
+	}
+	httpServer := NewHTTPServer(orchestrator, orchestrator.riskManager, httpPort)
+	go func() {
+		log.Printf("Starting HTTP server on port %d", httpPort)
+		if err := httpServer.Start(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+	defer httpServer.Stop()
+
 	// appCtx governs the entire application lifecycle, cancelled by OS signals.
 	appCtx, appCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer appCancel()
+	
+	// Stop orchestrator when app stops
+	defer orchestrator.Stop()
 
 	assetAddressesList := strings.Split(cfg.RFQAssetAddressesCSV, ",")
 	if len(assetAddressesList) == 0 || cfg.RFQAssetAddressesCSV == "" {
@@ -159,12 +188,30 @@ appRunningLoop:
 						log.Printf("[%s] Received trade confirmation for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
 						
 						// Get the underlying asset from the asset mapping
-						if underlying, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
-							// Hedge the order on the exchange
-							if err := HedgeOrder(confirmation, underlying, cfg, exchange); err != nil {
-								log.Printf("[%s] Error hedging order: %v", clientIdentifier, err)
+						if _, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
+							// Convert confirmation to TradeEvent and send to orchestrator
+							quantity, _ := decimal.NewFromString(confirmation.Quantity)
+							price, _ := decimal.NewFromString(confirmation.Price)
+							tradeEvent := &TradeEvent{
+								ID:             confirmation.QuoteNonce,
+								Source:         TradeSourceRysk,
+								Status:         TradeStatusExecuted,
+								RFQId:          confirmation.QuoteNonce,
+								Instrument:     confirmation.AssetAddress,
+								Strike:         decimal.RequireFromString(confirmation.Strike),
+								Expiry:         int64(confirmation.Expiry),
+								IsPut:          confirmation.IsPut,
+								Quantity:       quantity,
+								Price:          price,
+								IsTakerBuy:     confirmation.IsTakerBuy,
+								Timestamp:      time.Now(),
+							}
+							
+							// Send to orchestrator
+							if err := orchestrator.HandleManualTrade(tradeEvent); err != nil {
+								log.Printf("[%s] Error processing trade through orchestrator: %v", clientIdentifier, err)
 							} else {
-								log.Printf("[%s] Successfully hedged order for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+								log.Printf("[%s] Successfully sent trade to orchestrator for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
 							}
 						} else {
 							log.Printf("[%s] No asset mapping for %s. Cannot hedge.", clientIdentifier, confirmation.AssetAddress)
@@ -187,12 +234,30 @@ appRunningLoop:
 					log.Printf("[%s] Received RFQ confirmation for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
 					
 					// Get the underlying asset from the asset mapping
-					if underlying, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
-						// Hedge the order on the exchange
-						if err := HedgeOrder(confirmation, underlying, cfg, exchange); err != nil {
-							log.Printf("[%s] Error hedging order: %v", clientIdentifier, err)
+					if _, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
+						// Convert confirmation to TradeEvent and send to orchestrator
+						quantity, _ := decimal.NewFromString(confirmation.Quantity)
+						price, _ := decimal.NewFromString(confirmation.Price)
+						tradeEvent := &TradeEvent{
+							ID:             confirmation.QuoteNonce,
+							Source:         TradeSourceRysk,
+							Status:         TradeStatusExecuted,
+							RFQId:          confirmation.QuoteNonce,
+							Instrument:     confirmation.AssetAddress,
+							Strike:         decimal.RequireFromString(confirmation.Strike),
+							Expiry:         int64(confirmation.Expiry),
+							IsPut:          confirmation.IsPut,
+							Quantity:       quantity,
+							Price:          price,
+							IsTakerBuy:     confirmation.IsTakerBuy,
+							Timestamp:      time.Now(),
+						}
+						
+						// Send to orchestrator
+						if err := orchestrator.HandleManualTrade(tradeEvent); err != nil {
+							log.Printf("[%s] Error processing trade through orchestrator: %v", clientIdentifier, err)
 						} else {
-							log.Printf("[%s] Successfully hedged order for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+							log.Printf("[%s] Successfully sent trade to orchestrator for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
 						}
 					} else {
 						log.Printf("[%s] No asset mapping for %s. Cannot hedge.", clientIdentifier, confirmation.AssetAddress)

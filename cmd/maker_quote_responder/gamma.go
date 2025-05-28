@@ -136,6 +136,22 @@ type GammaDDHAlgo struct {
 	PriceTol     decimal.Decimal
 	AmountTol    decimal.Decimal
 	MidPriceTol  decimal.Decimal
+	exchange     Exchange
+}
+
+// NewGammaDDHAlgo creates a new gamma DDH algorithm instance
+func NewGammaDDHAlgo(exchange Exchange, gammaThreshold float64) *GammaDDHAlgo {
+	return &GammaDDHAlgo{
+		SubaccountID: 0,
+		PerpName:     "ETH-PERP",
+		MaxAbsDelta:  decimal.NewFromFloat(gammaThreshold),
+		MaxAbsSpread: decimal.NewFromFloat(0.002),
+		ActionWaitMS: 1000,
+		PriceTol:     decimal.NewFromFloat(0.0001),
+		AmountTol:    decimal.NewFromFloat(0.01),
+		MidPriceTol:  decimal.NewFromFloat(0.0001),
+		exchange:     exchange,
+	}
 }
 
 // GammaDDHState holds the current state for the algorithm
@@ -406,4 +422,17 @@ func (a *GammaDDHAlgo) StartHedger(ctx context.Context, state MarketData, client
 			}
 		}
 	}
+}
+
+// Start begins the gamma hedging process
+func (algo *GammaDDHAlgo) Start(ctx context.Context) {
+	log.Println("Starting Gamma DDH algorithm...")
+	// TODO: Implement gamma hedging loop
+}
+
+// OnNewPosition is called when a new position is opened
+func (algo *GammaDDHAlgo) OnNewPosition(instrument string, quantity decimal.Decimal, price decimal.Decimal) {
+	log.Printf("Gamma DDH: New position in %s - quantity: %s, price: %s", 
+		instrument, quantity.String(), price.String())
+	// TODO: Trigger gamma recalculation and potential hedge
 }

@@ -46,15 +46,8 @@ func NewRiskManager(config *AppConfig) *RiskManager {
 	maxGamma := decimal.NewFromFloat(100)
 	
 	// Override from config if available
-	if config.MaxPositionSize != "" {
-		if val, err := decimal.NewFromString(config.MaxPositionSize); err == nil {
-			maxPosition = val
-		}
-	}
-	if config.MaxDeltaExposure != "" {
-		if val, err := decimal.NewFromString(config.MaxDeltaExposure); err == nil {
-			maxDelta = val
-		}
+	if config.MaxPositionDelta > 0 {
+		maxDelta = decimal.NewFromFloat(config.MaxPositionDelta)
 	}
 	
 	return &RiskManager{
