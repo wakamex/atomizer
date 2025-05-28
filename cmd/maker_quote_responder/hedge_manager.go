@@ -159,11 +159,14 @@ func (hm *HedgeManager) calculateHedgePrice(orderBook CCXTOrderBook, isBuy bool)
 			return bestAsk.Mul(decimal.NewFromFloat(0.999))
 		}
 	} else {
-		// Selling - use best bid or slightly above
-		if len(orderBook.Bids) > 0 && len(orderBook.Bids[0]) >= 2 {
-			bestBid := decimal.NewFromFloat(orderBook.Bids[0][0])
-			// Place order slightly above best bid to ensure fill
-			return bestBid.Mul(decimal.NewFromFloat(1.001))
+		// Selling - use defensive 2x ask strategy during testing
+		if len(orderBook.Asks) > 0 && len(orderBook.Asks[0]) >= 2 {
+			bestAsk := decimal.NewFromFloat(orderBook.Asks[0][0])
+			// Place our ask at 2x the best ask for safety (far from top of book)
+			hedgePrice := bestAsk.Mul(decimal.NewFromFloat(2.0))
+			log.Printf("[HedgeManager] Defensive sell: best ask %s, placing at %s (2x)", 
+				bestAsk.String(), hedgePrice.String())
+			return hedgePrice
 		}
 	}
 	
