@@ -22,6 +22,18 @@ type AppConfig struct {
 	DummyPrice                string
 	QuoteValidDurationSeconds int64
 	AssetMapping              map[string]string // Maps asset addresses to underlying symbols (ETH, BTC, SOL)
+	ExchangeName              string            // Name of the exchange to use (e.g., "deribit", "okx", "bybit")
+	ExchangeTestMode          bool              // Whether to use the exchange's testnet
+	
+	// Arbitrage configuration
+	HTTPPort                  string            // Port for HTTP API server
+	MaxPositionDelta          float64           // Maximum position delta exposure
+	MinLiquidityScore         float64           // Minimum liquidity score for trades
+	EnableGammaHedging        bool              // Enable gamma hedging
+	GammaThreshold            float64           // Gamma threshold for hedging
+	EnableManualTrades        bool              // Enable manual trade API
+	CacheBackend              string            // Cache backend: "file" or "valkey"
+	ValkeyAddr                string            // Valkey server address
 }
 
 // LoadConfig parses command-line flags and environment variables
@@ -33,6 +45,19 @@ func LoadConfig() *AppConfig {
 	flag.StringVar(&cfg.RFQAssetAddressesCSV, "rfq_asset_addresses", "", "Comma-separated list of asset addresses for RFQ streams (e.g., 0xAsset1,0xAsset2)")
 	flag.StringVar(&cfg.DummyPrice, "dummy_price", "1000000", "Dummy price to quote (ensure format matches Rysk requirements, e.g., units)")
 	flag.Int64Var(&cfg.QuoteValidDurationSeconds, "quote_valid_duration_seconds", 30, "How long your quotes will be valid in seconds")
+	flag.StringVar(&cfg.ExchangeName, "exchange", "derive", "Exchange to use for hedging (e.g., derive, deribit, okx, bybit)")
+	flag.BoolVar(&cfg.ExchangeTestMode, "exchange_test_mode", false, "Use exchange testnet (true) or mainnet (false)")
+	
+	// Arbitrage flags
+	flag.StringVar(&cfg.HTTPPort, "http_port", "8080", "Port for HTTP API server")
+	flag.Float64Var(&cfg.MaxPositionDelta, "max_position_delta", 10.0, "Maximum position delta exposure")
+	flag.Float64Var(&cfg.MinLiquidityScore, "min_liquidity_score", 0.001, "Minimum liquidity score for trades")
+	flag.BoolVar(&cfg.EnableManualTrades, "enable_manual_trades", true, "Enable manual trade API")
+	flag.BoolVar(&cfg.EnableGammaHedging, "enable_gamma_hedging", false, "Enable gamma hedging")
+	flag.Float64Var(&cfg.GammaThreshold, "gamma_threshold", 0.1, "Gamma threshold for hedging")
+	flag.StringVar(&cfg.CacheBackend, "cache_backend", "file", "Cache backend: file or valkey")
+	flag.StringVar(&cfg.ValkeyAddr, "valkey_addr", "localhost:6379", "Valkey server address")
+	
 	flag.Parse()
 
 	cfg.MakerAddress = os.Getenv("MAKER_ADDRESS")
@@ -49,11 +74,25 @@ func LoadConfig() *AppConfig {
 	if cfg.PrivateKey == "" {
 		log.Fatal("Error: PRIVATE_KEY environment variable is not set or empty.")
 	}
-	if cfg.DeribitApiKey == "" {
-		log.Fatal("Error: DERIBIT_API_KEY environment variable is not set or empty.")
-	}
-	if cfg.DeribitApiSecret == "" {
-		log.Fatal("Error: DERIBIT_API_SECRET environment variable is not set or empty.")
+	
+	// Only check for Deribit credentials if Deribit is the selected exchange
+	if strings.ToLower(cfg.ExchangeName) == "deribit" {
+		// Check for asymmetric key first
+		asymmetricPrivateKey := os.Getenv("ASYMMETRIC_PRIVATE_KEY")
+		deribitClientId := os.Getenv("DERIBIT_CLIENT_ID")
+		
+		// Only require standard API credentials if asymmetric auth is not available
+		if asymmetricPrivateKey == "" || deribitClientId == "" {
+			if cfg.DeribitApiKey == "" {
+				log.Printf("Warning: DERIBIT_API_KEY not set. Deribit exchange will not be available.")
+				log.Printf("To use Deribit, set DERIBIT_API_KEY and DERIBIT_API_SECRET, or ASYMMETRIC_PRIVATE_KEY and DERIBIT_CLIENT_ID.")
+				// Change to a different exchange if Deribit credentials are not available
+				cfg.ExchangeName = "derive"
+				log.Printf("Switching to Derive exchange instead.")
+			} else if cfg.DeribitApiSecret == "" {
+				log.Fatal("Error: DERIBIT_API_SECRET environment variable is not set or empty.")
+			}
+		}
 	}
 	
 	// Validate private key format
@@ -78,6 +117,9 @@ func LoadConfig() *AppConfig {
 	}
 	
 	log.Printf("✓ Private key validation successful - derived address matches maker address: %s", cfg.MakerAddress)
+
+	// Load arbitrage configuration from environment
+	// These can override command-line flags if needed
 
 	// Initialize asset mapping
 	// TODO: This should be configurable via environment variables or config file

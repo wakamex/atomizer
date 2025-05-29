@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/wakamex/rysk-v12-cli/ryskcore"
 )
 
@@ -30,6 +32,8 @@ func EstablishConnectionWithRetry(ctx context.Context, url string, clientIdentif
 		client, err := ryskcore.NewClient(ctx, url, nil) // Pass the main context
 		if err == nil {
 			log.Printf("[%s] Successfully connected to %s.", clientIdentifier, url)
+			// Override ping/pong handlers with labeled versions
+			setupLabeledPingPong(client, clientIdentifier)
 			return client, nil
 		}
 
@@ -69,5 +73,28 @@ func SetupRfqStream(parentCtx context.Context, rfqStreamURL string, assetAddr st
 	}
 
 	log.Printf("[RFQ %s] Successfully connected to stream %s.", assetAddr, rfqStreamURL)
+	// Override ping/pong handlers with labeled versions
+	setupLabeledPingPong(client, fmt.Sprintf("RFQ %s", assetAddr))
 	return client, rfqClientCancel, nil
+}
+
+// setupLabeledPingPong sets up ping/pong handlers with custom labels for better logging
+func setupLabeledPingPong(client *ryskcore.Client, label string) {
+	if client.Connection == nil {
+		return
+	}
+	
+	client.Connection.SetPingHandler(func(appData string) error {
+		log.Printf("[%s] Ping received, sending Pong", label)
+		err := client.Connection.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(5*time.Second))
+		if err != nil {
+			log.Printf("[%s] Error sending pong: %v", label, err)
+		}
+		return nil
+	})
+	
+	client.Connection.SetPongHandler(func(appData string) error {
+		log.Printf("[%s] Pong received", label)
+		return nil
+	})
 }

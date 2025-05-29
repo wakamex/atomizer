@@ -2,14 +2,21 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"os/signal"
+	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/wakamex/rysk-v12-cli/ryskcore" // Re-add ryskcore for type definitions if needed, or ensure types are fully self-contained elsewhere
 )
 
@@ -18,13 +25,114 @@ const (
 	sessionMaxBackoff     = 30 * time.Second
 )
 
+// getBuildHash returns a hash of the binary to identify different builds
+func getBuildHash() string {
+	// Try to get build info
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	
+	// Create a hash from build info
+	h := sha256.New()
+	h.Write([]byte(info.Main.Version))
+	h.Write([]byte(info.Main.Sum))
+	h.Write([]byte(info.GoVersion))
+	
+	// Add VCS info if available
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" || setting.Key == "vcs.time" {
+			h.Write([]byte(setting.Value))
+		}
+	}
+	
+	// If we can read the binary itself, add its hash
+	if exePath, err := os.Executable(); err == nil {
+		if data, err := os.ReadFile(exePath); err == nil {
+			// Just hash first 1MB to avoid memory issues with large binaries
+			maxLen := 1024 * 1024
+			if len(data) > maxLen {
+				data = data[:maxLen]
+			}
+			h.Write(data)
+		}
+	}
+	
+	return hex.EncodeToString(h.Sum(nil))[:16] // Return first 16 chars for brevity
+}
+
 func main() {
+	// Check for version flag before setting up logging
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
+		fmt.Println(getBuildHash())
+		os.Exit(0)
+	}
+	
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+	
+	// Print build hash as first output
+	buildHash := getBuildHash()
+	log.Printf("========================================")
+	log.Printf("Build hash: %s", buildHash)
+	log.Printf("========================================")
+	
 	cfg := LoadConfig()
+	
+	// Create exchange instance using factory
+	factory := NewExchangeFactory()
+	exchange, err := factory.CreateExchange(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create exchange: %v", err)
+	}
+	if cfg.ExchangeTestMode {
+		log.Printf("Successfully initialized %s exchange in TEST MODE", cfg.ExchangeName)
+	} else {
+		log.Printf("Successfully initialized %s exchange in PRODUCTION MODE", cfg.ExchangeName)
+	}
+
+	// Fetch existing positions from exchange on startup
+	log.Printf("Fetching existing positions from %s...", cfg.ExchangeName)
+	positions, err := exchange.GetPositions()
+	if err != nil {
+		log.Printf("Warning: Failed to fetch positions from exchange: %v", err)
+		// Continue anyway - this is not fatal
+	} else {
+		log.Printf("Found %d existing positions on %s", len(positions), cfg.ExchangeName)
+		for _, pos := range positions {
+			log.Printf("  Position: %s %s %.4f @ avg %.2f (PnL: %.2f)", 
+				pos.Direction, pos.InstrumentName, pos.Amount, pos.AveragePrice, pos.PnL)
+		}
+	}
+
+	// Create orchestrator
+	orchestrator := NewArbitrageOrchestrator(cfg, exchange, positions)
+	
+	// Start the orchestrator
+	go orchestrator.Start()
+	
+	// Create and start HTTP server for manual trades
+	httpPort := 8080 // Default port
+	if cfg.HTTPPort != "" {
+		// Parse port from string
+		if port, err := strconv.Atoi(cfg.HTTPPort); err == nil {
+			httpPort = port
+		}
+	}
+	httpServer := NewHTTPServer(orchestrator, orchestrator.riskManager, httpPort)
+	go func() {
+		log.Printf("Starting HTTP server on port %d", httpPort)
+		if err := httpServer.Start(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+	defer httpServer.Stop()
 
 	// appCtx governs the entire application lifecycle, cancelled by OS signals.
 	appCtx, appCancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer appCancel()
+	
+	// Stop orchestrator when app stops
+	defer orchestrator.Stop()
 
 	assetAddressesList := strings.Split(cfg.RFQAssetAddressesCSV, ",")
 	if len(assetAddressesList) == 0 || cfg.RFQAssetAddressesCSV == "" {
@@ -90,9 +198,93 @@ appRunningLoop:
 					log.Printf("[%s] Received 'OK' confirmation for ID %s. Full message: %s", clientIdentifier, baseResponse.ID, string(message))
 					return
 				}
+				
+				// Check if this is a trade confirmation
+				if baseResponse.ID == "trade" {
+					var confirmation RFQConfirmation
+					if err := json.Unmarshal(baseResponse.Result, &confirmation); err != nil {
+						log.Printf("[%s] Error unmarshalling trade confirmation: %v", clientIdentifier, err)
+					} else {
+						log.Printf("[%s] Received trade confirmation for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+						
+						// Get the underlying asset from the asset mapping
+						if _, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
+							// Convert confirmation to TradeEvent and send to orchestrator
+							quantity, _ := decimal.NewFromString(confirmation.Quantity)
+							price, _ := decimal.NewFromString(confirmation.Price)
+							tradeEvent := &TradeEvent{
+								ID:             confirmation.QuoteNonce,
+								Source:         TradeSourceRysk,
+								Status:         TradeStatusExecuted,
+								RFQId:          confirmation.QuoteNonce,
+								Instrument:     confirmation.AssetAddress,
+								Strike:         decimal.RequireFromString(confirmation.Strike),
+								Expiry:         int64(confirmation.Expiry),
+								IsPut:          confirmation.IsPut,
+								Quantity:       quantity,
+								Price:          price,
+								IsTakerBuy:     confirmation.IsTakerBuy,
+								Timestamp:      time.Now(),
+							}
+							
+							// Send to orchestrator
+							if err := orchestrator.HandleManualTrade(tradeEvent); err != nil {
+								log.Printf("[%s] Error processing trade through orchestrator: %v", clientIdentifier, err)
+							} else {
+								log.Printf("[%s] Successfully sent trade to orchestrator for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+							}
+						} else {
+							log.Printf("[%s] No asset mapping for %s. Cannot hedge.", clientIdentifier, confirmation.AssetAddress)
+						}
+						return
+					}
+				}
+				
 				log.Printf("[%s] Received Result for ID %s: %s", clientIdentifier, baseResponse.ID, string(baseResponse.Result))
 			} else if baseResponse.Method != "" {
-				log.Printf("[%s] Received unhandled method '%s' with ID %s. Params: %s", clientIdentifier, baseResponse.Method, baseResponse.ID, string(baseResponse.Params))
+				// Handle different methods
+				switch baseResponse.Method {
+				case "rfq_confirmation":
+					// Handle RFQ confirmation - this means a trade was executed
+					var confirmation RFQConfirmation
+					if err := json.Unmarshal(baseResponse.Params, &confirmation); err != nil {
+						log.Printf("[%s] Error unmarshalling rfq_confirmation params: %v", clientIdentifier, err)
+						return
+					}
+					log.Printf("[%s] Received RFQ confirmation for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+					
+					// Get the underlying asset from the asset mapping
+					if _, hasMapping := cfg.AssetMapping[confirmation.AssetAddress]; hasMapping {
+						// Convert confirmation to TradeEvent and send to orchestrator
+						quantity, _ := decimal.NewFromString(confirmation.Quantity)
+						price, _ := decimal.NewFromString(confirmation.Price)
+						tradeEvent := &TradeEvent{
+							ID:             confirmation.QuoteNonce,
+							Source:         TradeSourceRysk,
+							Status:         TradeStatusExecuted,
+							RFQId:          confirmation.QuoteNonce,
+							Instrument:     confirmation.AssetAddress,
+							Strike:         decimal.RequireFromString(confirmation.Strike),
+							Expiry:         int64(confirmation.Expiry),
+							IsPut:          confirmation.IsPut,
+							Quantity:       quantity,
+							Price:          price,
+							IsTakerBuy:     confirmation.IsTakerBuy,
+							Timestamp:      time.Now(),
+						}
+						
+						// Send to orchestrator
+						if err := orchestrator.HandleManualTrade(tradeEvent); err != nil {
+							log.Printf("[%s] Error processing trade through orchestrator: %v", clientIdentifier, err)
+						} else {
+							log.Printf("[%s] Successfully sent trade to orchestrator for Quote ID %s", clientIdentifier, confirmation.QuoteNonce)
+						}
+					} else {
+						log.Printf("[%s] No asset mapping for %s. Cannot hedge.", clientIdentifier, confirmation.AssetAddress)
+					}
+				default:
+					log.Printf("[%s] Received unhandled method '%s' with ID %s. Params: %s", clientIdentifier, baseResponse.Method, baseResponse.ID, string(baseResponse.Params))
+				}
 			} else {
 				log.Printf("[%s] Received message with no error, result, or method. ID: %s. Raw: %s", clientIdentifier, baseResponse.ID, string(message))
 			}
@@ -125,7 +317,7 @@ appRunningLoop:
 				localRfqSdkClient := rfqSdkClient // Capture client for this handler
 
 				localRfqSdkClient.SetHandler(func(message []byte) {
-					HandleRfqMessage(message, currentAssetAddr, mainSdkClient, cfg) // mainSdkClient is from the outer scope
+					HandleRfqMessage(message, currentAssetAddr, mainSdkClient, cfg, exchange) // mainSdkClient is from the outer scope
 				})
 			}
 			log.Printf("RFQ stream setup complete for session. %d streams active.", len(rfqClients))

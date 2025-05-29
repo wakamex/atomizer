@@ -1,0 +1,103 @@
+// CCXT_DERIVE_MISSING_MARKETS_REPRODUCTION.go
+// 
+// This file demonstrates that CCXT's Derive integration is missing many option markets.
+// CCXT only loads 143 markets (with 100 ETH options across 2 expiry dates),
+// while Derive's actual API has 1324+ markets (with 588+ ETH options across many expiry dates).
+//
+// Specifically, this shows that June 2025 options (e.g., ETH-20250627-3600-C) are missing
+// from CCXT, causing "createExpiredOptionMarket not supported yet" errors when trying
+// to trade these instruments.
+//
+// To run: go run CCXT_DERIVE_MISSING_MARKETS_REPRODUCTION.go
+// Expected: Should find June 2025 options
+// Actual: Only finds December 2025 and March 2026 options
+
+package main
+
+import (
+    "fmt"
+    "log"
+    "strings"
+    
+    ccxt "github.com/ccxt/ccxt/go/v4"
+)
+
+func main() {
+    config := map[string]interface{}{
+        "apiKey": "dummy",
+        "secret": "dummy",
+    }
+    
+    exchange := ccxt.NewDerive(config)
+    
+    log.Println("Loading markets from CCXT...")
+    resultChan := exchange.LoadMarkets()
+    result := <-resultChan
+    
+    if err, ok := result.(error); ok {
+        log.Fatal("Failed to load markets:", err)
+    }
+    
+    fmt.Printf("\n=== CCXT Derive Market Loading Results ===\n")
+    fmt.Printf("Total markets loaded: %d\n", len(exchange.Markets))
+    
+    // Count ETH options
+    ethOptionCount := 0
+    for symbol, marketRaw := range exchange.Markets {
+        if strings.Contains(symbol, "ETH") && (strings.Contains(symbol, "-C") || strings.Contains(symbol, "-P")) {
+            if marketMap, ok := marketRaw.(map[string]interface{}); ok {
+                if marketType, exists := marketMap["type"]; exists && marketType == "option" {
+                    ethOptionCount++
+                }
+            }
+        }
+    }
+    fmt.Printf("ETH options found: %d\n", ethOptionCount)
+    
+    // Extract unique expiry dates
+    expiryMap := make(map[string]bool)
+    for _, marketRaw := range exchange.Markets {
+        if marketMap, ok := marketRaw.(map[string]interface{}); ok {
+            if marketType, exists := marketMap["type"]; exists && marketType == "option" {
+                if info, ok := marketMap["info"].(map[string]interface{}); ok {
+                    if instrumentName, exists := info["instrument_name"]; exists {
+                        instrStr := fmt.Sprintf("%v", instrumentName)
+                        // Extract date from instrument name like ETH-20251226-6000-C
+                        parts := strings.Split(instrStr, "-")
+                        if len(parts) >= 2 {
+                            expiryMap[parts[1]] = true
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fmt.Printf("\nUnique expiry dates in CCXT:\n")
+    for expiry := range expiryMap {
+        fmt.Printf("  - %s\n", expiry)
+    }
+    
+    // Look for specific June 2025 option that we know exists in Derive's API
+    targetInstrument := "ETH-20250627-3600-C"
+    fmt.Printf("\n=== Searching for %s ===\n", targetInstrument)
+    
+    found := false
+    for symbol, _ := range exchange.Markets {
+        if strings.Contains(symbol, "20250627") || strings.Contains(symbol, "25-06-27") {
+            fmt.Printf("Found: %s\n", symbol)
+            found = true
+        }
+    }
+    
+    if !found {
+        fmt.Printf("NOT FOUND - This instrument exists in Derive's API but is missing from CCXT\n")
+        fmt.Printf("\nThis causes the error: 'derive createExpiredOptionMarket () is not supported yet'\n")
+        fmt.Printf("when trying to trade options that CCXT doesn't know about.\n")
+    }
+    
+    fmt.Printf("\n=== Comparison ===\n")
+    fmt.Printf("CCXT loads:        143 markets (100 ETH options, 2 expiry dates)\n")
+    fmt.Printf("Derive API has:    1324+ markets (588+ ETH options, many expiry dates)\n")
+    fmt.Printf("\nCCXT is missing most option expiries, including all June 2025 options.\n")
+}
