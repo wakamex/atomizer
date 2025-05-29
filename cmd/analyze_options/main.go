@@ -87,6 +87,7 @@ type CallAnalysisResult struct {
 	NormTotalOI     float64
 	NormTopBook     float64
 	NormSpread      float64
+	SpreadPercent   float64
 	IntrinsicValue  float64
 	BidToIntrinsic  float64
 	AskToIntrinsic  float64
@@ -583,9 +584,15 @@ func (oa *OptionAnalysis) CalculateLiquidityScores(results []CallAnalysisResult)
 		// Top of book amounts
 		topBookAmounts[i] = r.Ticker.BestBidAmount.Add(r.Ticker.BestAskAmount).InexactFloat64()
 		
-		// Bid-ask spread
+		// Bid-ask spread as percentage of mid price
 		if r.Ticker.BestAskPrice.GreaterThan(decimal.Zero) && r.Ticker.BestBidPrice.GreaterThan(decimal.Zero) {
-			spreads[i] = r.Ticker.BestAskPrice.Sub(r.Ticker.BestBidPrice).InexactFloat64()
+			bid := r.Ticker.BestBidPrice.InexactFloat64()
+			ask := r.Ticker.BestAskPrice.InexactFloat64()
+			spread := ask - bid
+			mid := (bid + ask) / 2
+			if mid > 0 {
+				spreads[i] = (spread / mid) * 100 // Store as percentage
+			}
 		}
 	}
 	
@@ -603,6 +610,7 @@ func (oa *OptionAnalysis) CalculateLiquidityScores(results []CallAnalysisResult)
 		results[i].NormTotalOI = normOIs[i]
 		results[i].NormTopBook = normTopBooks[i]
 		results[i].NormSpread = normSpreads[i]
+		results[i].SpreadPercent = spreads[i] // Store the actual spread percentage
 		
 		// Multiplicative score
 		results[i].LiquidityScore = normVolumes[i] * normTrades[i] * normOIs[i] * 
@@ -771,19 +779,29 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	})
 	
 	// Display top 10 most liquid
-	fmt.Println("\n" + strings.Repeat("=", 80))
+	fmt.Println("\n" + strings.Repeat("=", 100))
 	fmt.Printf("TOP 10 MOST LIQUID %s CALLS\n", currency)
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Printf("\n%-30s %8s %8s %8s %10s %6s %8s\n", 
-		"Instrument", "Bid", "Ask", "Score", "Volume", "Trades", "Delta")
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Println(strings.Repeat("=", 100))
+	fmt.Printf("\n%-30s %8s %8s %8s %7s %8s %10s %6s %8s\n", 
+		"Instrument", "Bid", "Ask", "Spread", "Sprd %", "Score", "Volume", "Trades", "Delta")
+	fmt.Println(strings.Repeat("-", 100))
 	
 	for i := 0; i < 10 && i < len(results); i++ {
 		r := results[i]
-		fmt.Printf("%-30s %8.2f %8.2f %8.6f %10.0f %6d %8.4f\n",
+		bid := r.Ticker.BestBidPrice.InexactFloat64()
+		ask := r.Ticker.BestAskPrice.InexactFloat64()
+		spread := ask - bid
+		mid := (bid + ask) / 2
+		spreadPct := 0.0
+		if mid > 0 {
+			spreadPct = (spread / mid) * 100
+		}
+		fmt.Printf("%-30s %8.2f %8.2f %8.2f %6.1f%% %8.6f %10.0f %6d %8.4f\n",
 			r.Ticker.InstrumentName,
-			r.Ticker.BestBidPrice.InexactFloat64(),
-			r.Ticker.BestAskPrice.InexactFloat64(),
+			bid,
+			ask,
+			spread,
+			spreadPct,
 			r.LiquidityScore,
 			r.Ticker.Stats.ContractVolume.InexactFloat64(),
 			func() int { n, _ := strconv.Atoi(r.Ticker.Stats.NumTrades); return n }(),
@@ -792,22 +810,23 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	}
 	
 	// Show liquidity score components
-	fmt.Println("\n" + strings.Repeat("=", 80))
+	fmt.Println("\n" + strings.Repeat("=", 90))
 	fmt.Println("LIQUIDITY SCORE COMPONENTS (Top 10)")
-	fmt.Println(strings.Repeat("=", 80))
-	fmt.Printf("\n%-30s %8s %8s %8s %8s %8s\n",
-		"Instrument", "Volume", "Trades", "OI", "TopBook", "Spread")
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Println(strings.Repeat("=", 90))
+	fmt.Printf("\n%-30s %8s %8s %8s %8s %8s %8s\n",
+		"Instrument", "Volume", "Trades", "OI", "TopBook", "Spread", "Sprd %")
+	fmt.Println(strings.Repeat("-", 90))
 	
 	for i := 0; i < 10 && i < len(results); i++ {
 		r := results[i]
-		fmt.Printf("%-30s %8.4f %8.4f %8.4f %8.4f %8.4f\n",
+		fmt.Printf("%-30s %8.4f %8.4f %8.4f %8.4f %8.4f %7.1f%%\n",
 			r.Ticker.InstrumentName,
 			r.NormVolume,
 			r.NormTrades,
 			r.NormTotalOI,
 			r.NormTopBook,
 			r.NormSpread,
+			r.SpreadPercent,
 		)
 	}
 	
