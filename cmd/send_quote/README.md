@@ -5,19 +5,30 @@ A WebSocket-based tool for sending RFQs (Request for Quotes) to the Rysk taker e
 ## Prerequisites
 
 - `markets.json` file containing asset addresses (automatically fetched if not present)
-- Go 1.24.2 or later
+- Go 1.21 or later
 
 ## Usage
 
-### Quick Start
+### Using the Unified CLI (Recommended)
 
 ```bash
-./send_rfq.sh
+# Send a single quote
+atomizer send-quote -i ETH-20250530-2800-C -s buy -p 100 --size 0.1
+
+# Specify exchange
+atomizer send-quote -e derive -i ETH-20250530-2800-C -s sell -p 150 --size 0.5
+
+# Get help
+atomizer help send-quote
 ```
 
-### Manual Usage
+### Direct Binary Usage
 
 ```bash
+# Using the script
+./send_rfq.sh
+
+# Using the binary directly
 ./send_quote \
   -url wss://rip-testnet.rysk.finance/taker \
   -chainId 84532 \

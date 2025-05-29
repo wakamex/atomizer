@@ -62,6 +62,9 @@ atomizer help <command>
 # Run the RFQ responder
 atomizer rfq --derive-key $PRIVATE_KEY --derive-wallet $WALLET
 
+# Run market maker
+atomizer market-maker -expiry 20250530 -strikes 2800 --improvement 0.05
+
 # Analyze options markets
 atomizer analyze -u ETH -e 0
 
@@ -85,6 +88,21 @@ Runs the RFQ (Request for Quote) responder that connects to exchange WebSocket A
 - Automatic hedging on execution
 - Multi-exchange support (Derive, Deribit)
 - Configurable pricing strategies
+
+### `atomizer market-maker`
+Runs continuous two-sided quoting for specified options.
+
+**Key features:**
+- Automated bid/ask order placement
+- Configurable price improvement
+- Position and exposure limits
+- Smart order replacement to minimize gaps
+- Support for multiple strikes simultaneously
+
+**Example:**
+```bash
+atomizer market-maker -expiry 20250530 -strikes 2800,3000,3200 --size 0.1
+```
 
 ### `atomizer analyze`
 Analyzes options market liquidity and pricing across exchanges.
