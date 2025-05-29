@@ -1,14 +1,15 @@
-# Atomizer Project
+# Atomizer - Unified Options Trading Toolkit
 
-This repository contains the Atomizer project, a comprehensive market making system for Rysk Finance with automated hedging capabilities.
-It utilizes the `ryskV12-cli` as a submodule located in the `sdk` directory.
+Atomizer is a comprehensive command-line toolkit for options trading, providing automated market making, RFQ response, market analysis, and position management capabilities.
 
 ## Features
 
-- **Automated Market Making**: Connects to Rysk Finance WebSocket API to receive and respond to RFQs
-- **Deribit Hedging**: Automatically hedges positions on Deribit when trades are executed
-- **Real-time Pricing**: Fetches live option prices from Deribit for competitive quoting
-- **Market Analysis Tools**: Command-line utilities for market inventory, RFQ testing, and performance analysis
+- **Unified CLI**: Single `atomizer` command with subcommands for all functionality
+- **RFQ Responder**: Automated quote generation for Request-for-Quote systems
+- **Market Analysis**: Real-time liquidity analysis with spread metrics and volatility comparisons
+- **Position Management**: Track inventory and P&L across multiple exchanges
+- **Multi-Exchange Support**: Works with Derive/Lyra and Deribit (more coming soon)
+- **Automated Hedging**: Hedge positions automatically when trades are executed
 
 ## Progress
 
@@ -25,27 +26,87 @@ combo:
 - [x] market analysis tools (inventory, markets, send_quote)
 
 
-## Prerequisites
+## Installation
 
+### Prerequisites
+- Go 1.21 or later
 - Git
-- Go (version as specified in `examples/go.mod` and `sdk/go.mod`)
 
-## Setup
+### Quick Start
 
 1. Clone the repository:
    ```bash
-   git clone <repository_url> atomizer
+   git clone https://github.com/wakamex/atomizer.git
    cd atomizer
    ```
 
-2. Initialize and update the submodule:
+2. Build all components:
    ```bash
-   git submodule update --init --recursive
+   ./build.sh
    ```
 
-## Applications
+3. Add to PATH (optional):
+   ```bash
+   export PATH=$PATH:$(pwd)/bin
+   ```
 
-### 1. Maker Quote Responder (`cmd/maker_quote_responder/`)
+## Usage
+
+```bash
+# Show available commands
+atomizer help
+
+# Get help for a specific command
+atomizer help <command>
+
+# Run the RFQ responder
+atomizer rfq --derive-key $PRIVATE_KEY --derive-wallet $WALLET
+
+# Analyze options markets
+atomizer analyze -u ETH -e 0
+
+# Show current positions
+atomizer inventory
+
+# List available markets
+atomizer markets --underlying ETH
+
+# Send a single quote
+atomizer send-quote -i ETH-20250530-2800-C -s buy -p 100 --size 0.1
+```
+
+## Commands
+
+### `atomizer rfq`
+Runs the RFQ (Request for Quote) responder that connects to exchange WebSocket APIs and automatically provides quotes based on market conditions.
+
+**Key features:**
+- Real-time quote generation
+- Automatic hedging on execution
+- Multi-exchange support (Derive, Deribit)
+- Configurable pricing strategies
+
+### `atomizer analyze`
+Analyzes options market liquidity and pricing across exchanges.
+
+**Key features:**
+- Liquidity scoring based on volume, trades, open interest, and spreads
+- Spread analysis (absolute and percentage)
+- Implied volatility comparisons
+- Greeks and pricing metrics
+
+### `atomizer inventory`
+Shows current positions and P&L across configured exchanges.
+
+### `atomizer markets`
+Lists available markets and instruments with filtering options.
+
+### `atomizer send-quote`
+Utility to send individual quotes/orders for testing.
+
+## Architecture
+
+### Applications
 
 The primary application that connects to Rysk Finance API, listens for RFQs, responds with quotes, and automatically hedges on Deribit.
 
