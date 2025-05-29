@@ -21,6 +21,8 @@ import (
 // OptionAnalysis provides analysis of option instruments
 type OptionAnalysis struct {
 	instruments map[string]DeriveInstrument
+	exchange    string
+	deribitClient *DeribitClient
 }
 
 // TickerResult represents the API response for ticker data
@@ -93,21 +95,42 @@ type CallAnalysisResult struct {
 }
 
 // NewOptionAnalysis creates a new analysis instance
-func NewOptionAnalysis() *OptionAnalysis {
-	return &OptionAnalysis{
+func NewOptionAnalysis(exchange string) *OptionAnalysis {
+	oa := &OptionAnalysis{
 		instruments: make(map[string]DeriveInstrument),
+		exchange:    exchange,
 	}
+	
+	// Initialize Deribit client if needed
+	if exchange == "deribit" {
+		testMode := os.Getenv("DERIBIT_TEST_MODE") == "true"
+		oa.deribitClient = NewDeribitClient(testMode)
+	}
+	
+	return oa
 }
 
 // LoadInstruments fetches all option instruments
 func (oa *OptionAnalysis) LoadInstruments() error {
-	fmt.Println("Fetching all option instruments from Derive...")
-	instruments, err := LoadAllDeriveMarkets()
-	if err != nil {
-		return fmt.Errorf("failed to load markets: %w", err)
+	var err error
+	
+	switch oa.exchange {
+	case "deribit":
+		fmt.Println("Fetching all option instruments from Deribit...")
+		oa.instruments, err = oa.deribitClient.LoadAllDeribitMarkets()
+		if err != nil {
+			return fmt.Errorf("failed to load Deribit markets: %w", err)
+		}
+	default:
+		// Default to Derive/Lyra
+		fmt.Println("Fetching all option instruments from Derive...")
+		oa.instruments, err = LoadAllDeriveMarkets()
+		if err != nil {
+			return fmt.Errorf("failed to load Derive markets: %w", err)
+		}
 	}
-	oa.instruments = instruments
-	fmt.Printf("Loaded %d option instruments\n", len(instruments))
+	
+	fmt.Printf("Loaded %d option instruments from %s\n", len(oa.instruments), oa.exchange)
 	return nil
 }
 
@@ -463,25 +486,31 @@ func (oa *OptionAnalysis) ShowStrikeDistribution() {
 
 // FetchTicker fetches ticker data for a single instrument
 func (oa *OptionAnalysis) FetchTicker(instrumentName string) (*TickerResult, error) {
-	url := "https://api.lyra.finance/public/get_ticker"
-	payload := map[string]string{"instrument_name": instrumentName}
-	jsonData, _ := json.Marshal(payload)
-	
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	switch oa.exchange {
+	case "deribit":
+		return oa.deribitClient.FetchDeribitTicker(instrumentName)
+	default:
+		// Default to Derive/Lyra
+		url := "https://api.lyra.finance/public/get_ticker"
+		payload := map[string]string{"instrument_name": instrumentName}
+		jsonData, _ := json.Marshal(payload)
+		
+		resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+		if err != nil {
+			return nil, fmt.Errorf("HTTP request failed: %w", err)
+		}
+		defer resp.Body.Close()
+		
+		var result struct {
+			Result TickerResult `json:"result"`
+		}
+		
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("JSON decode failed: %w", err)
+		}
+		
+		return &result.Result, nil
 	}
-	defer resp.Body.Close()
-	
-	var result struct {
-		Result TickerResult `json:"result"`
-	}
-	
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("JSON decode failed: %w", err)
-	}
-	
-	return &result.Result, nil
 }
 
 // normalizeMetric normalizes a slice of values between 0 and 1
@@ -583,10 +612,16 @@ func (oa *OptionAnalysis) CalculateLiquidityScores(results []CallAnalysisResult)
 func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	now := time.Now()
 	
-	// Find all unique expiries for ETH calls
+	// Determine which currency to analyze
+	currency := "ETH"
+	if oa.exchange == "deribit" && os.Getenv("ANALYZE_BTC") == "true" {
+		currency = "BTC"
+	}
+	
+	// Find all unique expiries for calls
 	expiryMap := make(map[int64][]DeriveInstrument)
 	for _, inst := range oa.instruments {
-		if inst.BaseCurrency == "ETH" && 
+		if inst.BaseCurrency == currency && 
 		   inst.OptionDetails.OptionType == "C" &&
 		   inst.OptionDetails.Expiry > now.Unix() {
 			expiryMap[inst.OptionDetails.Expiry] = append(expiryMap[inst.OptionDetails.Expiry], inst)
@@ -602,7 +637,7 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	
 	// Check if we have enough expiries
 	if len(expiries) == 0 {
-		return fmt.Errorf("no ETH call options found")
+		return fmt.Errorf("no %s call options found", currency)
 	}
 	
 	// Validate expiry index
@@ -625,19 +660,19 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	}
 	
 	fmt.Printf("\n" + strings.Repeat("=", 80))
-	fmt.Printf("\nFETCHING ETH CALL OPTIONS - %s EXPIRY: %s (%.1f days)\n", 
-		expiryLabel, selectedExpiryTime.Format("2006-01-02 15:04"), daysToExpiry)
+	fmt.Printf("\nFETCHING %s CALL OPTIONS - %s EXPIRY: %s (%.1f days)\n", 
+		currency, expiryLabel, selectedExpiryTime.Format("2006-01-02 15:04"), daysToExpiry)
 	fmt.Println(strings.Repeat("=", 80))
 	
-	// Get ETH calls for selected expiry
-	ethCalls := expiryMap[selectedExpiry]
+	// Get calls for selected expiry
+	calls := expiryMap[selectedExpiry]
 	
-	if len(ethCalls) == 0 {
-		fmt.Println("No ETH calls found in the specified time range")
+	if len(calls) == 0 {
+		fmt.Printf("No %s calls found in the specified time range\n", currency)
 		return nil
 	}
 	
-	fmt.Printf("Fetching ticker data for %d ETH calls...\n", len(ethCalls))
+	fmt.Printf("Fetching ticker data for %d %s calls...\n", len(calls), currency)
 	
 	// Channel for results
 	type fetchResult struct {
@@ -646,7 +681,7 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 		instrument string
 	}
 	
-	resultChan := make(chan fetchResult, len(ethCalls))
+	resultChan := make(chan fetchResult, len(calls))
 	
 	// Semaphore to limit concurrent requests
 	sem := make(chan struct{}, 10) // Allow up to 10 concurrent requests
@@ -655,7 +690,7 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	var wg sync.WaitGroup
 	
 	// Launch goroutines to fetch ticker data
-	for _, call := range ethCalls {
+	for _, call := range calls {
 		wg.Add(1)
 		go func(inst DeriveInstrument) {
 			defer wg.Done()
@@ -706,7 +741,7 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	}()
 	
 	// Collect results
-	results := make([]CallAnalysisResult, 0, len(ethCalls))
+	results := make([]CallAnalysisResult, 0, len(calls))
 	successCount := 0
 	errorCount := 0
 	
@@ -714,12 +749,12 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 		if res.err != nil {
 			errorCount++
 			fmt.Printf("\rFetched: %d/%d (Errors: %d) - Failed: %s", 
-				successCount+errorCount, len(ethCalls), errorCount, res.instrument)
+				successCount+errorCount, len(calls), errorCount, res.instrument)
 		} else {
 			successCount++
 			results = append(results, res.result)
 			fmt.Printf("\rFetched: %d/%d (Errors: %d)", 
-				successCount+errorCount, len(ethCalls), errorCount)
+				successCount+errorCount, len(calls), errorCount)
 		}
 	}
 	
@@ -735,7 +770,7 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	
 	// Display top 10 most liquid
 	fmt.Println("\n" + strings.Repeat("=", 80))
-	fmt.Println("TOP 10 MOST LIQUID ETH CALLS")
+	fmt.Printf("TOP 10 MOST LIQUID %s CALLS\n", currency)
 	fmt.Println(strings.Repeat("=", 80))
 	fmt.Printf("\n%-30s %8s %8s %8s %10s %6s %8s\n", 
 		"Instrument", "Bid", "Ask", "Score", "Volume", "Trades", "Delta")
@@ -827,7 +862,7 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	}
 	
 	// Export results to CSV
-	filename := fmt.Sprintf("eth_calls_liquidity_%s.csv", now.Format("20060102_150405"))
+	filename := fmt.Sprintf("%s_calls_liquidity_%s.csv", strings.ToLower(currency), now.Format("20060102_150405"))
 	file, err := os.Create(filename)
 	if err != nil {
 		return fmt.Errorf("failed to create CSV: %w", err)
@@ -874,7 +909,7 @@ func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Options Analysis Tool")
-		fmt.Println("Usage: go run analyze_options.go [command]")
+		fmt.Println("Usage: go run analyze_options.go [command] [options]")
 		fmt.Println("\nCommands:")
 		fmt.Println("  all       - Run all analyses")
 		fmt.Println("  expiry    - Analyze by expiry date")
@@ -883,10 +918,22 @@ func main() {
 		fmt.Println("  stats     - Show active options statistics + strike distribution")
 		fmt.Println("  active    - Show active percentage by expiry with indicators")
 		fmt.Println("  query [N] - Query ETH calls with liquidity analysis (Nth expiry, default: 1)")
+		fmt.Println("\nOptions:")
+		fmt.Println("  --exchange=deribit  - Use Deribit instead of Derive/Lyra (default)")
+		fmt.Println("\nEnvironment Variables:")
+		fmt.Println("  DERIBIT_TEST_MODE=true  - Use Deribit testnet")
 		return
 	}
 
-	analyzer := NewOptionAnalysis()
+	// Check for exchange flag
+	exchange := "derive"
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "--exchange=") {
+			exchange = strings.TrimPrefix(arg, "--exchange=")
+		}
+	}
+
+	analyzer := NewOptionAnalysis(exchange)
 	if err := analyzer.LoadInstruments(); err != nil {
 		log.Fatalf("Failed to load instruments: %v", err)
 	}
