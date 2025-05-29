@@ -68,6 +68,12 @@ func main() {
 		os.Exit(0)
 	}
 	
+	// Check for market-maker subcommand
+	if len(os.Args) > 1 && os.Args[1] == "market-maker" {
+		RunMarketMaker(os.Args[2:])
+		os.Exit(0)
+	}
+	
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	
 	// Print build hash as first output
