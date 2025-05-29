@@ -12,6 +12,20 @@ type Exchange interface {
 	
 	// ConvertToInstrument converts option details to exchange-specific instrument format
 	ConvertToInstrument(asset string, strike string, expiry int64, isPut bool) (string, error)
+	
+	// GetPositions fetches all open positions from the exchange
+	GetPositions() ([]ExchangePosition, error)
+}
+
+// ExchangePosition represents an open position on the exchange
+type ExchangePosition struct {
+	InstrumentName string
+	Amount         float64
+	Direction      string  // "buy" or "sell"
+	AveragePrice   float64
+	MarkPrice      float64
+	IndexPrice     float64
+	PnL            float64
 }
 
 // ExchangeConfig holds common configuration for exchanges

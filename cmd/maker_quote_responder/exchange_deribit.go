@@ -200,3 +200,10 @@ func (d *DeribitExchange) ConvertToInstrument(asset string, strike string, expir
 	return instrumentName, nil
 }
 
+// GetPositions fetches all open positions from Deribit
+func (d *DeribitExchange) GetPositions() ([]ExchangePosition, error) {
+	// TODO: Implement Deribit position fetching via CCXT
+	log.Printf("[Deribit] GetPositions not yet implemented")
+	return []ExchangePosition{}, nil
+}
+

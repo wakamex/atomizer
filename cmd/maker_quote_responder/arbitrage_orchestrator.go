@@ -65,13 +65,30 @@ type ArbitrageOrchestrator struct {
 }
 
 // NewArbitrageOrchestrator creates a new orchestrator
-func NewArbitrageOrchestrator(cfg *AppConfig, exchange Exchange) *ArbitrageOrchestrator {
+func NewArbitrageOrchestrator(cfg *AppConfig, exchange Exchange, existingPositions []ExchangePosition) *ArbitrageOrchestrator {
 	ctx, cancel := context.WithCancel(context.Background())
+	
+	// Create risk manager
+	riskManager := NewRiskManager(cfg)
+	
+	// Initialize risk manager with existing positions
+	if len(existingPositions) > 0 {
+		log.Printf("Initializing risk manager with %d existing positions", len(existingPositions))
+		for _, pos := range existingPositions {
+			// Convert Derive position to internal position format
+			// For now, we'll just log them - actual position tracking would need
+			// to parse the instrument name and update the risk manager's state
+			log.Printf("  Risk Manager: Adding position %s %s %.4f", 
+				pos.Direction, pos.InstrumentName, pos.Amount)
+			// TODO: Parse instrument name to extract asset, strike, expiry, etc.
+			// and update risk manager's position tracking
+		}
+	}
 	
 	return &ArbitrageOrchestrator{
 		config:       cfg,
 		hedgeManager: NewHedgeManager(exchange, cfg),
-		riskManager:  NewRiskManager(cfg),
+		riskManager:  riskManager,
 		gammaModule:  NewGammaDDHAlgo(exchange, cfg.GammaThreshold),
 		tradeQueue:   make(chan TradeEvent, 100),
 		activeTrades: make(map[string]*TradeEvent),

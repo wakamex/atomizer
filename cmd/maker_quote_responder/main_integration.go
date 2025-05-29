@@ -7,7 +7,7 @@ import (
 // InitializeArbitrageSystem sets up the arbitrage components
 func InitializeArbitrageSystem(cfg *AppConfig, exchange Exchange) (*ArbitrageOrchestrator, error) {
 	// Create the arbitrage orchestrator
-	orchestrator := NewArbitrageOrchestrator(cfg, exchange)
+	orchestrator := NewArbitrageOrchestrator(cfg, exchange, []ExchangePosition{})
 	
 	// Start the orchestrator
 	if err := orchestrator.Start(); err != nil {

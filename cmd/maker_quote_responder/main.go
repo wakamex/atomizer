@@ -62,6 +62,12 @@ func getBuildHash() string {
 }
 
 func main() {
+	// Check for version flag before setting up logging
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v" || os.Args[1] == "version") {
+		fmt.Println(getBuildHash())
+		os.Exit(0)
+	}
+	
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	
 	// Print build hash as first output
@@ -84,8 +90,22 @@ func main() {
 		log.Printf("Successfully initialized %s exchange in PRODUCTION MODE", cfg.ExchangeName)
 	}
 
+	// Fetch existing positions from exchange on startup
+	log.Printf("Fetching existing positions from %s...", cfg.ExchangeName)
+	positions, err := exchange.GetPositions()
+	if err != nil {
+		log.Printf("Warning: Failed to fetch positions from exchange: %v", err)
+		// Continue anyway - this is not fatal
+	} else {
+		log.Printf("Found %d existing positions on %s", len(positions), cfg.ExchangeName)
+		for _, pos := range positions {
+			log.Printf("  Position: %s %s %.4f @ avg %.2f (PnL: %.2f)", 
+				pos.Direction, pos.InstrumentName, pos.Amount, pos.AveragePrice, pos.PnL)
+		}
+	}
+
 	// Create orchestrator
-	orchestrator := NewArbitrageOrchestrator(cfg, exchange)
+	orchestrator := NewArbitrageOrchestrator(cfg, exchange, positions)
 	
 	// Start the orchestrator
 	go orchestrator.Start()

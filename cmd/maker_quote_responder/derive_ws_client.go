@@ -12,11 +12,12 @@ import (
 
 // DeriveWSClient handles WebSocket connection to Derive
 type DeriveWSClient struct {
-	conn     *websocket.Conn
-	auth     *DeriveAuth
-	wallet   string
-	mu       sync.Mutex
-	requests map[string]chan json.RawMessage
+	conn         *websocket.Conn
+	auth         *DeriveAuth
+	wallet       string
+	subaccounts  []int
+	mu           sync.Mutex
+	requests     map[string]chan json.RawMessage
 }
 
 // NewDeriveWSClient creates a new Derive WebSocket client
@@ -153,6 +154,10 @@ func (c *DeriveWSClient) login() error {
 		if result.Error != nil {
 			return fmt.Errorf("login error: %s", result.Error.Message)
 		}
+		
+		// Store subaccount IDs
+		c.subaccounts = result.Result
+		
 		log.Printf("[Derive WS] Login successful. Subaccounts: %v", result.Result)
 		return nil
 	case <-time.After(10 * time.Second):
@@ -325,6 +330,61 @@ func (c *DeriveWSClient) GetOpenOrders(subaccountID uint64) ([]map[string]interf
 		
 	case <-time.After(10 * time.Second):
 		return nil, fmt.Errorf("get orders timeout")
+	}
+}
+
+// GetDefaultSubaccount returns the first subaccount ID
+func (c *DeriveWSClient) GetDefaultSubaccount() uint64 {
+	if len(c.subaccounts) > 0 {
+		return uint64(c.subaccounts[0])
+	}
+	return 0
+}
+
+// GetPositions fetches all positions for the subaccount
+func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interface{}, error) {
+	id := fmt.Sprintf("%d", time.Now().UnixMilli())
+	
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method": "private/get_positions",
+		"params": map[string]interface{}{
+			"subaccount_id": subaccountID,
+		},
+		"id": id,
+	}
+	
+	log.Printf("[Derive WS] Querying positions for subaccount %d", subaccountID)
+	
+	respChan := c.sendRequest(req)
+	
+	select {
+	case resp := <-respChan:
+		var result struct {
+			Result struct {
+				SubaccountID int                      `json:"subaccount_id"`
+				Positions    []map[string]interface{} `json:"positions"`
+			} `json:"result"`
+			Error *struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		
+		if err := json.Unmarshal(resp, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse positions response: %w", err)
+		}
+		
+		if result.Error != nil {
+			return nil, fmt.Errorf("get positions error: %s", result.Error.Message)
+		}
+		
+		log.Printf("[Derive WS] Found %d positions", len(result.Result.Positions))
+		
+		return result.Result.Positions, nil
+		
+	case <-time.After(10 * time.Second):
+		return nil, fmt.Errorf("get positions timeout")
 	}
 }
 

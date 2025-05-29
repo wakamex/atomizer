@@ -662,6 +662,62 @@ func (d *CCXTDeriveExchange) placeDeriveOrderWithPersistentWS(instrumentName str
 }
 
 // Close closes the persistent WebSocket connection if it exists
+// GetPositions fetches all open positions from Derive
+func (d *CCXTDeriveExchange) GetPositions() ([]ExchangePosition, error) {
+	// Get WebSocket client
+	wsClient, shouldClose, err := d.getOrCreateWebSocket()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get WebSocket client: %w", err)
+	}
+	
+	// Only close if we created a new connection
+	if shouldClose {
+		defer wsClient.Close()
+	}
+	
+	// Use the default subaccount ID from login
+	subaccountID := wsClient.GetDefaultSubaccount()
+	log.Printf("[Derive] Using subaccount ID: %d", subaccountID)
+	
+	// Fetch positions from Derive
+	rawPositions, err := wsClient.GetPositions(subaccountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get positions: %w", err)
+	}
+	
+	// Convert raw positions to our ExchangePosition struct
+	var positions []ExchangePosition
+	for _, rawPos := range rawPositions {
+		// Extract fields from raw position
+		instrumentName, _ := rawPos["instrument_name"].(string)
+		amount, _ := rawPos["amount"].(float64)
+		direction, _ := rawPos["direction"].(string)
+		averagePrice, _ := rawPos["average_price"].(float64)
+		markPrice, _ := rawPos["mark_price"].(float64)
+		indexPrice, _ := rawPos["index_price"].(float64)
+		pnl, _ := rawPos["pnl"].(float64)
+		
+		position := ExchangePosition{
+			InstrumentName: instrumentName,
+			Amount:         amount,
+			Direction:      direction,
+			AveragePrice:   averagePrice,
+			MarkPrice:      markPrice,
+			IndexPrice:     indexPrice,
+			PnL:            pnl,
+		}
+		
+		positions = append(positions, position)
+		
+		log.Printf("[Derive] Position: %s %s %.4f @ avg %.2f (mark: %.2f, PnL: %.2f)", 
+			direction, instrumentName, amount, averagePrice, markPrice, pnl)
+	}
+	
+	log.Printf("[Derive] Total positions: %d", len(positions))
+	
+	return positions, nil
+}
+
 func (d *CCXTDeriveExchange) Close() error {
 	d.wsClientMu.Lock()
 	defer d.wsClientMu.Unlock()

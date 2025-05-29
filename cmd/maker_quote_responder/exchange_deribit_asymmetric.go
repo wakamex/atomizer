@@ -109,6 +109,13 @@ func (d *DeribitAsymmetricExchange) ConvertToInstrument(asset string, strike str
 	return convertDeribitInstrument(asset, strike, expiry, isPut)
 }
 
+// GetPositions fetches all open positions from Deribit
+func (d *DeribitAsymmetricExchange) GetPositions() ([]ExchangePosition, error) {
+	// TODO: Implement Deribit position fetching
+	log.Printf("[Deribit] GetPositions not yet implemented")
+	return []ExchangePosition{}, nil
+}
+
 // Helper function shared with standard Deribit implementation
 func convertDeribitInstrument(asset string, strike string, expiry int64, isPut bool) (string, error) {
 	// Convert the strike from a big.Int string to a normal number

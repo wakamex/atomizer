@@ -21,7 +21,7 @@ func TestArbitrageOrchestrator(t *testing.T) {
 	mockExchange := &MockExchange{}
 
 	// Create orchestrator
-	orchestrator := NewArbitrageOrchestrator(cfg, mockExchange)
+	orchestrator := NewArbitrageOrchestrator(cfg, mockExchange, []ExchangePosition{})
 	if err := orchestrator.Start(); err != nil {
 		t.Fatalf("Failed to start orchestrator: %v", err)
 	}
@@ -169,4 +169,8 @@ func (m *MockExchange) ConvertToInstrument(asset, strike string, expiry int64, i
 	}
 	expiryTime := time.Unix(expiry, 0)
 	return fmt.Sprintf("%s-%s-%s-%s", asset, expiryTime.Format("20060102"), strike, optType), nil
+}
+
+func (m *MockExchange) GetPositions() ([]ExchangePosition, error) {
+	return []ExchangePosition{}, nil
 }
