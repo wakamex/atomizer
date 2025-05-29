@@ -4,6 +4,24 @@ Fetches and saves market asset data from the Rysk API.
 
 ## Usage
 
+### Using the Unified CLI (Recommended)
+
+```bash
+# List available markets
+atomizer markets
+
+# Filter by underlying asset
+atomizer markets --underlying ETH
+
+# Filter by expiry
+atomizer markets --expiry 20250530
+
+# Get help
+atomizer help markets
+```
+
+### Direct Binary Usage
+
 ```bash
 # Using the script
 ./markets.sh

@@ -1,7 +1,49 @@
+# Environment and config
 .env
 *.csv
 .claude
-# Exclude the binary specifically (not the directory)
-cmd/maker_quote_responder/maker_quote_responder
-# If there's a binary at root level, exclude it too
+
+# Binaries
+/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go build artifacts in cmd directories
+cmd/*/[!.]*
+!cmd/*/
+!cmd/*/*.go
+!cmd/*/*.md
+!cmd/*/*.sh
+!cmd/*/*.json
+!cmd/*/go.mod
+!cmd/*/go.sum
+
+# Root level binaries
 /maker_quote_responder
+/atomizer
+/analyze_options
+/inventory
+/markets
+/send_quote
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db

@@ -22,7 +22,7 @@ import (
 type OptionAnalysis struct {
 	instruments map[string]DeriveInstrument
 	exchange    string
-	deribitClient *DeribitClient
+	// deribitClient *DeribitClient // TODO: Implement Deribit support
 }
 
 // TickerResult represents the API response for ticker data
@@ -104,8 +104,8 @@ func NewOptionAnalysis(exchange string) *OptionAnalysis {
 	
 	// Initialize Deribit client if needed
 	if exchange == "deribit" {
-		testMode := os.Getenv("DERIBIT_TEST_MODE") == "true"
-		oa.deribitClient = NewDeribitClient(testMode)
+		// TODO: Implement Deribit support
+		log.Fatal("Deribit exchange not yet implemented")
 	}
 	
 	return oa
@@ -118,7 +118,8 @@ func (oa *OptionAnalysis) LoadInstruments() error {
 	switch oa.exchange {
 	case "deribit":
 		fmt.Println("Fetching all option instruments from Deribit...")
-		oa.instruments, err = oa.deribitClient.LoadAllDeribitMarkets()
+		// oa.instruments, err = oa.deribitClient.LoadAllDeribitMarkets() // TODO: Implement
+		return fmt.Errorf("Deribit not yet implemented")
 		if err != nil {
 			return fmt.Errorf("failed to load Deribit markets: %w", err)
 		}
@@ -489,7 +490,8 @@ func (oa *OptionAnalysis) ShowStrikeDistribution() {
 func (oa *OptionAnalysis) FetchTicker(instrumentName string) (*TickerResult, error) {
 	switch oa.exchange {
 	case "deribit":
-		return oa.deribitClient.FetchDeribitTicker(instrumentName)
+		// return oa.deribitClient.FetchDeribitTicker(instrumentName) // TODO: Implement
+		return nil, fmt.Errorf("Deribit not yet implemented")
 	default:
 		// Default to Derive/Lyra
 		url := "https://api.lyra.finance/public/get_ticker"

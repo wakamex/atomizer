@@ -9,8 +9,25 @@ A command-line tool for analyzing Derive options market data with caching suppor
 - **Active Options by Expiry**: Visual breakdown of active vs inactive options
 - **Export Functionality**: Export filtered options to CSV format
 - **Cache Support**: Uses file-based caching for efficient data retrieval
+- **Liquidity Analysis**: Advanced scoring based on volume, trades, open interest, and spreads
 
 ## Usage
+
+### Using the Unified CLI (Recommended)
+
+```bash
+# Analyze options markets
+atomizer analyze
+
+# Analyze with specific parameters
+atomizer analyze -u ETH -e 0    # ETH options at nearest expiry
+atomizer analyze -u BTC -e 1    # BTC options at second nearest expiry
+
+# Get help
+atomizer help analyze
+```
+
+### Direct Binary Usage
 
 ```bash
 # Build the tool

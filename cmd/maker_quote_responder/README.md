@@ -9,6 +9,23 @@ This application is a production-ready market maker that connects to the Rysk Fi
 - **OKX**: Planned
 - **Bybit**: Planned
 
+## Usage
+
+### Using the Unified CLI (Recommended)
+
+```bash
+# Run the RFQ responder
+atomizer rfq
+
+# With specific exchange
+atomizer rfq -e derive --derive-key $PRIVATE_KEY --derive-wallet $WALLET
+
+# Get help
+atomizer help rfq
+```
+
+### Direct Binary Usage
+
 ## Prerequisites
 
 1.  **Go**: Ensure Go (version 1.18 or later recommended) is installed. See [Go Installation Guide](https://go.dev/doc/install).
