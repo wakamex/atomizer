@@ -36,6 +36,11 @@ case "$COMMAND" in
         echo "Showing active percentage by expiry..."
         go run ../analyze_options/ active
         ;;
+    "query")
+        EXPIRY_INDEX="${2:-1}"
+        echo "Querying ETH calls for expiry #$EXPIRY_INDEX..."
+        go run ../analyze_options/ query $EXPIRY_INDEX
+        ;;
     "help"|*)
         echo "Usage: ./analyze_options.sh [command] [args]"
         echo ""
@@ -46,11 +51,14 @@ case "$COMMAND" in
         echo "  export [days]          - Export ETH calls to CSV (default: 1 day)"
         echo "  stats                  - Show active options statistics + strike distribution"
         echo "  active                 - Show active percentage by expiry with ✓/✗ indicators"
+        echo "  query [N]              - Query ETH calls for Nth expiry (default: 1=nearest, 2=second-nearest)"
         echo ""
         echo "Examples:"
         echo "  ./analyze_options.sh                   # Run all analyses"
         echo "  ./analyze_options.sh nearterm 7        # Show options expiring in 7 days"
         echo "  ./analyze_options.sh export 2          # Export ETH calls expiring in 2 days"
+        echo "  ./analyze_options.sh query             # Query nearest expiry ETH calls"
+        echo "  ./analyze_options.sh query 2           # Query second-nearest expiry ETH calls"
         ;;
 esac
 

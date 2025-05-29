@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"bytes"
 	"encoding/json"
@@ -578,8 +579,8 @@ func (oa *OptionAnalysis) CalculateLiquidityScores(results []CallAnalysisResult)
 	}
 }
 
-// QueryETHCalls fetches and analyzes ETH call options expiring soon
-func (oa *OptionAnalysis) QueryETHCalls(maxDays int) error {
+// QueryETHCalls fetches and analyzes ETH call options for a specific expiry
+func (oa *OptionAnalysis) QueryETHCalls(expiryIndex int) error {
 	now := time.Now()
 	
 	// Find all unique expiries for ETH calls
@@ -599,22 +600,37 @@ func (oa *OptionAnalysis) QueryETHCalls(maxDays int) error {
 	}
 	sort.Slice(expiries, func(i, j int) bool { return expiries[i] < expiries[j] })
 	
-	// Use the nearest expiry
+	// Check if we have enough expiries
 	if len(expiries) == 0 {
 		return fmt.Errorf("no ETH call options found")
 	}
 	
-	nearestExpiry := expiries[0]
-	nearestExpiryTime := time.Unix(nearestExpiry, 0)
-	daysToExpiry := nearestExpiryTime.Sub(now).Hours() / 24
+	// Validate expiry index
+	if expiryIndex < 1 || expiryIndex > len(expiries) {
+		return fmt.Errorf("invalid expiry index %d. Available expiries: %d", expiryIndex, len(expiries))
+	}
+	
+	// Use the requested expiry (1-indexed)
+	selectedExpiry := expiries[expiryIndex-1]
+	selectedExpiryTime := time.Unix(selectedExpiry, 0)
+	daysToExpiry := selectedExpiryTime.Sub(now).Hours() / 24
+	
+	expiryLabel := "NEAREST"
+	if expiryIndex == 2 {
+		expiryLabel = "SECOND-NEAREST"
+	} else if expiryIndex == 3 {
+		expiryLabel = "THIRD-NEAREST"
+	} else if expiryIndex > 3 {
+		expiryLabel = fmt.Sprintf("%dTH-NEAREST", expiryIndex)
+	}
 	
 	fmt.Printf("\n" + strings.Repeat("=", 80))
-	fmt.Printf("\nFETCHING ETH CALL OPTIONS - NEAREST EXPIRY: %s (%.1f days)\n", 
-		nearestExpiryTime.Format("2006-01-02 15:04"), daysToExpiry)
+	fmt.Printf("\nFETCHING ETH CALL OPTIONS - %s EXPIRY: %s (%.1f days)\n", 
+		expiryLabel, selectedExpiryTime.Format("2006-01-02 15:04"), daysToExpiry)
 	fmt.Println(strings.Repeat("=", 80))
 	
-	// Get ETH calls for nearest expiry
-	ethCalls := expiryMap[nearestExpiry]
+	// Get ETH calls for selected expiry
+	ethCalls := expiryMap[selectedExpiry]
 	
 	if len(ethCalls) == 0 {
 		fmt.Println("No ETH calls found in the specified time range")
@@ -623,42 +639,88 @@ func (oa *OptionAnalysis) QueryETHCalls(maxDays int) error {
 	
 	fmt.Printf("Fetching ticker data for %d ETH calls...\n", len(ethCalls))
 	
-	// Fetch ticker data with rate limiting
+	// Channel for results
+	type fetchResult struct {
+		result CallAnalysisResult
+		err    error
+		instrument string
+	}
+	
+	resultChan := make(chan fetchResult, len(ethCalls))
+	
+	// Semaphore to limit concurrent requests
+	sem := make(chan struct{}, 10) // Allow up to 10 concurrent requests
+	
+	// WaitGroup to track all goroutines
+	var wg sync.WaitGroup
+	
+	// Launch goroutines to fetch ticker data
+	for _, call := range ethCalls {
+		wg.Add(1)
+		go func(inst DeriveInstrument) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			
+			// Fetch ticker
+			ticker, err := oa.FetchTicker(inst.InstrumentName)
+			if err != nil {
+				resultChan <- fetchResult{err: err, instrument: inst.InstrumentName}
+				return
+			}
+			
+			// Calculate days to expiry
+			expiry := time.Unix(ticker.OptionDetails.Expiry, 0)
+			daysToExpiry := expiry.Sub(now).Hours() / 24
+			
+			// Calculate intrinsic value
+			spotPrice := ticker.IndexPrice.InexactFloat64()
+			strike, _ := strconv.ParseFloat(ticker.OptionDetails.Strike, 64)
+			intrinsicValue := math.Max(0, spotPrice - strike)
+			
+			result := CallAnalysisResult{
+				Ticker:         *ticker,
+				DaysToExpiry:   daysToExpiry,
+				IntrinsicValue: intrinsicValue,
+			}
+			
+			// Calculate bid/ask to intrinsic ratios
+			if intrinsicValue > 0.001 {
+				result.BidToIntrinsic = ticker.BestBidPrice.InexactFloat64() / intrinsicValue
+				result.AskToIntrinsic = ticker.BestAskPrice.InexactFloat64() / intrinsicValue
+			}
+			
+			resultChan <- fetchResult{result: result, instrument: inst.InstrumentName}
+			
+			// Small delay to avoid rate limiting
+			time.Sleep(20 * time.Millisecond)
+		}(call)
+	}
+	
+	// Close result channel when all goroutines are done
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+	
+	// Collect results
 	results := make([]CallAnalysisResult, 0, len(ethCalls))
-	for i, call := range ethCalls {
-		fmt.Printf("\rFetching %d/%d: %s", i+1, len(ethCalls), call.InstrumentName)
-		
-		ticker, err := oa.FetchTicker(call.InstrumentName)
-		if err != nil {
-			fmt.Printf(" - Error: %v\n", err)
-			continue
+	successCount := 0
+	errorCount := 0
+	
+	for res := range resultChan {
+		if res.err != nil {
+			errorCount++
+			fmt.Printf("\rFetched: %d/%d (Errors: %d) - Failed: %s", 
+				successCount+errorCount, len(ethCalls), errorCount, res.instrument)
+		} else {
+			successCount++
+			results = append(results, res.result)
+			fmt.Printf("\rFetched: %d/%d (Errors: %d)", 
+				successCount+errorCount, len(ethCalls), errorCount)
 		}
-		
-		// Calculate days to expiry
-		expiry := time.Unix(ticker.OptionDetails.Expiry, 0)
-		daysToExpiry := expiry.Sub(now).Hours() / 24
-		
-		// Calculate intrinsic value
-		spotPrice := ticker.IndexPrice.InexactFloat64()
-		strike, _ := strconv.ParseFloat(ticker.OptionDetails.Strike, 64)
-		intrinsicValue := math.Max(0, spotPrice - strike)
-		
-		result := CallAnalysisResult{
-			Ticker:         *ticker,
-			DaysToExpiry:   daysToExpiry,
-			IntrinsicValue: intrinsicValue,
-		}
-		
-		// Calculate bid/ask to intrinsic ratios
-		if intrinsicValue > 0.001 {
-			result.BidToIntrinsic = ticker.BestBidPrice.InexactFloat64() / intrinsicValue
-			result.AskToIntrinsic = ticker.BestAskPrice.InexactFloat64() / intrinsicValue
-		}
-		
-		results = append(results, result)
-		
-		// Rate limiting
-		time.Sleep(50 * time.Millisecond)
 	}
 	
 	fmt.Printf("\n\nSuccessfully fetched %d ticker results\n", len(results))
@@ -820,7 +882,7 @@ func main() {
 		fmt.Println("  export    - Export ETH calls (0-1 day)")
 		fmt.Println("  stats     - Show active options statistics + strike distribution")
 		fmt.Println("  active    - Show active percentage by expiry with indicators")
-		fmt.Println("  query     - Query ETH calls with liquidity analysis (nearest expiry)")
+		fmt.Println("  query [N] - Query ETH calls with liquidity analysis (Nth expiry, default: 1)")
 		return
 	}
 
@@ -865,13 +927,13 @@ func main() {
 	case "active":
 		analyzer.ShowActivePercentageByExpiry()
 	case "query":
-		days := 1
+		expiryIndex := 1
 		if len(os.Args) > 2 {
-			if d, err := strconv.Atoi(os.Args[2]); err == nil {
-				days = d
+			if idx, err := strconv.Atoi(os.Args[2]); err == nil {
+				expiryIndex = idx
 			}
 		}
-		if err := analyzer.QueryETHCalls(days); err != nil {
+		if err := analyzer.QueryETHCalls(expiryIndex); err != nil {
 			log.Fatalf("Query failed: %v", err)
 		}
 	default:
