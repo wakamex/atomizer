@@ -172,18 +172,49 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 	// Calculate our quotes
 	bidPrice, askPrice := mm.calculateQuotes(ticker)
 	
+	// Check if we need to update quotes
+	// Only update if market has moved more than 0.5% or we don't have orders
+	mm.mu.RLock()
+	existingOrders := mm.ordersByInstrument[instrument]
+	mm.mu.RUnlock()
+	
+	needsUpdate := false
+	if existingOrders == nil || len(existingOrders) == 0 {
+		needsUpdate = true
+	} else {
+		// Check if market has moved significantly
+		threshold := decimal.NewFromFloat(0.005) // 0.5% threshold
+		
+		if bidOrder, exists := existingOrders["buy"]; exists {
+			priceDiff := bidPrice.Sub(bidOrder.Price).Abs()
+			if priceDiff.Div(bidOrder.Price).GreaterThan(threshold) {
+				needsUpdate = true
+			}
+		}
+		
+		if askOrder, exists := existingOrders["sell"]; exists {
+			priceDiff := askPrice.Sub(askOrder.Price).Abs()
+			if priceDiff.Div(askOrder.Price).GreaterThan(threshold) {
+				needsUpdate = true
+			}
+		}
+	}
+	
+	if !needsUpdate {
+		// Market hasn't moved enough, skip update
+		log.Printf("Market hasn't moved significantly for %s, keeping existing orders", instrument)
+		return nil
+	}
+	
 	// Check risk limits
 	if !mm.checkRiskLimits(instrument, mm.config.QuoteSize) {
 		log.Printf("Risk limits exceeded for %s, skipping quote update", instrument)
 		return nil
 	}
 	
-	// Cancel existing orders
-	mm.cancelOrdersForInstrument(instrument)
-	
-	// Place new orders
-	if err := mm.placeQuotes(instrument, bidPrice, askPrice); err != nil {
-		return fmt.Errorf("failed to place quotes: %w", err)
+	// Update quotes - use replace if we have existing orders
+	if err := mm.updateQuotes(instrument, bidPrice, askPrice); err != nil {
+		return fmt.Errorf("failed to update quotes: %w", err)
 	}
 	
 	return nil
@@ -195,9 +226,9 @@ func (mm *MarketMaker) calculateQuotes(ticker *TickerUpdate) (bidPrice, askPrice
 	midPrice := ticker.BestBid.Add(ticker.BestAsk).Div(decimal.NewFromInt(2))
 	
 	// Our quotes: improve the market
-	// Bid: best bid + 0.1 (or configured spread)
-	// Ask: best ask - 0.1 (or configured spread)
-	improvementAmount := decimal.NewFromFloat(0.1)
+	// Bid: best bid + improvement amount
+	// Ask: best ask - improvement amount
+	improvementAmount := mm.config.PriceImprovement
 	
 	bidPrice = ticker.BestBid.Add(improvementAmount)
 	askPrice = ticker.BestAsk.Sub(improvementAmount)
@@ -211,6 +242,80 @@ func (mm *MarketMaker) calculateQuotes(ticker *TickerUpdate) (bidPrice, askPrice
 	}
 	
 	return bidPrice, askPrice
+}
+
+// updateQuotes updates quotes for an instrument, using replace when possible
+func (mm *MarketMaker) updateQuotes(instrument string, bidPrice, askPrice decimal.Decimal) error {
+	mm.mu.RLock()
+	existingOrders := mm.ordersByInstrument[instrument]
+	mm.mu.RUnlock()
+	
+	// If we have existing orders, try to replace them
+	if existingOrders != nil && len(existingOrders) > 0 {
+		var bidOrderID, askOrderID string
+		var replacedBid, replacedAsk bool
+		
+		// Replace bid order if it exists
+		if bidOrder, exists := existingOrders["buy"]; exists {
+			newBidOrderID, err := mm.exchange.ReplaceOrder(bidOrder.OrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
+			if err != nil {
+				log.Printf("Failed to replace bid order %s: %v, will cancel and recreate", bidOrder.OrderID, err)
+			} else {
+				bidOrderID = newBidOrderID
+				replacedBid = true
+				log.Printf("Replaced bid order %s with %s at %.4f", bidOrder.OrderID, newBidOrderID, bidPrice)
+			}
+		}
+		
+		// Replace ask order if it exists
+		if askOrder, exists := existingOrders["sell"]; exists {
+			newAskOrderID, err := mm.exchange.ReplaceOrder(askOrder.OrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
+			if err != nil {
+				log.Printf("Failed to replace ask order %s: %v, will cancel and recreate", askOrder.OrderID, err)
+			} else {
+				askOrderID = newAskOrderID
+				replacedAsk = true
+				log.Printf("Replaced ask order %s with %s at %.4f", askOrder.OrderID, newAskOrderID, askPrice)
+			}
+		}
+		
+		// Update tracking for replaced orders
+		mm.mu.Lock()
+		if replacedBid && bidOrderID != "" {
+			// Remove old order
+			if oldBid, exists := existingOrders["buy"]; exists {
+				delete(mm.activeOrders, oldBid.OrderID)
+			}
+			// Track new order
+			mm.trackOrder(bidOrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
+			mm.stats.OrdersReplaced++
+		}
+		if replacedAsk && askOrderID != "" {
+			// Remove old order
+			if oldAsk, exists := existingOrders["sell"]; exists {
+				delete(mm.activeOrders, oldAsk.OrderID)
+			}
+			// Track new order
+			mm.trackOrder(askOrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
+			mm.stats.OrdersReplaced++
+		}
+		mm.mu.Unlock()
+		
+		// If both were replaced successfully, we're done
+		if replacedBid && replacedAsk {
+			log.Printf("Updated quotes for %s: Bid %.4f, Ask %.4f", instrument, bidPrice, askPrice)
+			return nil
+		}
+		
+		// Otherwise, cancel remaining orders and place new ones
+		if !replacedBid || !replacedAsk {
+			mm.cancelOrdersForInstrument(instrument)
+			return mm.placeQuotes(instrument, bidPrice, askPrice)
+		}
+	}
+	
+	// No existing orders, place new ones
+	return mm.placeQuotes(instrument, bidPrice, askPrice)
 }
 
 // placeQuotes places bid and ask orders

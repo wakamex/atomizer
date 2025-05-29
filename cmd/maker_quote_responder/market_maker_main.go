@@ -32,6 +32,7 @@ func RunMarketMaker(args []string) {
 		maxPosition   = fs.Float64("max-position", 1.0, "Maximum position per instrument")
 		maxExposure   = fs.Float64("max-exposure", 10.0, "Maximum total exposure")
 		minSpreadBps  = fs.Int("min-spread", 1000, "Minimum spread in basis points")
+		improvement   = fs.Float64("improvement", 0.1, "Price improvement amount")
 		privateKey    = fs.String("private-key", "", "Private key (overrides env var)")
 		walletAddress = fs.String("wallet", "", "Wallet address (Derive only)")
 		dryRun        = fs.Bool("dry-run", false, "Print configuration without starting")
@@ -73,6 +74,7 @@ func RunMarketMaker(args []string) {
 		SpreadBps:        *spreadBps,
 		QuoteSize:        decimal.NewFromFloat(*size),
 		RefreshInterval:  time.Duration(*refreshSec) * time.Second,
+		PriceImprovement: decimal.NewFromFloat(*improvement),
 		MaxPositionSize:  decimal.NewFromFloat(*maxPosition),
 		MaxTotalExposure: decimal.NewFromFloat(*maxExposure),
 		CancelThreshold:  decimal.NewFromFloat(0.005), // 0.5% default
@@ -96,6 +98,7 @@ func RunMarketMaker(args []string) {
 	}
 	log.Printf("  Spread: %d bps (%.2f%%)", config.SpreadBps, float64(config.SpreadBps)/100)
 	log.Printf("  Quote Size: %s", config.QuoteSize)
+	log.Printf("  Price Improvement: %s", config.PriceImprovement)
 	log.Printf("  Refresh Interval: %s", config.RefreshInterval)
 	log.Printf("  Max Position: %s", config.MaxPositionSize)
 	log.Printf("  Max Exposure: %s", config.MaxTotalExposure)
