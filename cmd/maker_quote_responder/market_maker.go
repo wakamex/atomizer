@@ -169,8 +169,19 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 		return fmt.Errorf("no ticker data for %s", instrument)
 	}
 	
+	// Fetch orderbook if reference size is configured
+	var orderBook *MarketMakerOrderBook
+	if mm.config.ImprovementReferenceSize.GreaterThan(decimal.Zero) {
+		var err error
+		orderBook, err = mm.exchange.GetOrderBook(instrument)
+		if err != nil {
+			log.Printf("Failed to fetch orderbook for %s: %v, using ticker data", instrument, err)
+			// Continue with ticker data only
+		}
+	}
+	
 	// Calculate our quotes
-	bidPrice, askPrice := mm.calculateQuotes(ticker)
+	bidPrice, askPrice := mm.calculateQuotes(ticker, orderBook)
 	
 	// Check risk limits
 	if !mm.checkRiskLimits(instrument, mm.config.QuoteSize) {
@@ -190,17 +201,55 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 }
 
 // calculateQuotes calculates bid and ask prices based on current market
-func (mm *MarketMaker) calculateQuotes(ticker *TickerUpdate) (bidPrice, askPrice decimal.Decimal) {
+func (mm *MarketMaker) calculateQuotes(ticker *TickerUpdate, orderBook *MarketMakerOrderBook) (bidPrice, askPrice decimal.Decimal) {
 	// Calculate mid price
 	midPrice := ticker.BestBid.Add(ticker.BestAsk).Div(decimal.NewFromInt(2))
 	
-	// Our quotes: improve the market
-	// Bid: best bid + 0.1 (or configured spread)
-	// Ask: best ask - 0.1 (or configured spread)
-	improvementAmount := decimal.NewFromFloat(0.1)
+	// Determine reference prices based on orderbook or ticker
+	referenceBid := ticker.BestBid
+	referenceAsk := ticker.BestAsk
 	
-	bidPrice = ticker.BestBid.Add(improvementAmount)
-	askPrice = ticker.BestAsk.Sub(improvementAmount)
+	// If we have orderbook data and reference size is set, find the best bid/ask that meets size requirement
+	if orderBook != nil && mm.config.ImprovementReferenceSize.GreaterThan(decimal.Zero) {
+		// Find the best bid with sufficient size
+		foundBid := false
+		for _, bid := range orderBook.Bids {
+			if bid.Size.GreaterThanOrEqual(mm.config.ImprovementReferenceSize) {
+				referenceBid = bid.Price
+				foundBid = true
+				break
+			}
+		}
+		
+		// Find the best ask with sufficient size
+		foundAsk := false
+		for _, ask := range orderBook.Asks {
+			if ask.Size.GreaterThanOrEqual(mm.config.ImprovementReferenceSize) {
+				referenceAsk = ask.Price
+				foundAsk = true
+				break
+			}
+		}
+		
+		// If we couldn't find sufficient size on either side, fall back to mid price with spread
+		if !foundBid || !foundAsk {
+			spreadAmount := midPrice.Mul(decimal.NewFromInt(int64(mm.config.SpreadBps)).Div(decimal.NewFromInt(10000)))
+			if !foundBid {
+				referenceBid = midPrice.Sub(spreadAmount.Div(decimal.NewFromInt(2)))
+			}
+			if !foundAsk {
+				referenceAsk = midPrice.Add(spreadAmount.Div(decimal.NewFromInt(2)))
+			}
+		}
+	}
+	
+	// Our quotes: improve the market
+	// Bid: reference bid + improvement (or configured spread)
+	// Ask: reference ask - improvement (or configured spread)
+	improvementAmount := mm.config.Improvement
+	
+	bidPrice = referenceBid.Add(improvementAmount)
+	askPrice = referenceAsk.Sub(improvementAmount)
 	
 	// Ensure minimum spread
 	minSpread := midPrice.Mul(decimal.NewFromInt(int64(mm.config.MinSpreadBps)).Div(decimal.NewFromInt(10000)))

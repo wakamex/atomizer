@@ -23,6 +23,9 @@ atomizer rfq -e derive --derive-key $PRIVATE_KEY --derive-wallet $WALLET
 # Run the market maker
 atomizer market-maker --expiry 20250601 --strikes 2600,2800,3000
 
+# With custom improvement strategy
+atomizer market-maker --expiry 20250601 --strikes 3000 --improvement 0.5 --improvement-reference-size 5.0
+
 # Get help
 atomizer help rfq
 atomizer help market-maker

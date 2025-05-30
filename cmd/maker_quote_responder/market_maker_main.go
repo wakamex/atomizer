@@ -32,6 +32,8 @@ func RunMarketMaker(args []string) {
 		maxPosition   = fs.Float64("max-position", 1.0, "Maximum position per instrument")
 		maxExposure   = fs.Float64("max-exposure", 10.0, "Maximum total exposure")
 		minSpreadBps  = fs.Int("min-spread", 1000, "Minimum spread in basis points")
+		improvement   = fs.Float64("improvement", 0.1, "Amount to improve quotes by (tighten spread)")
+		improvementReferenceSize = fs.Float64("improvement-reference-size", 0, "Minimum size for best bid/ask selection (0 = any size)")
 		privateKey    = fs.String("private-key", "", "Private key (overrides env var)")
 		walletAddress = fs.String("wallet", "", "Wallet address (Derive only)")
 		dryRun        = fs.Bool("dry-run", false, "Print configuration without starting")
@@ -79,6 +81,8 @@ func RunMarketMaker(args []string) {
 		MaxOrdersPerSide: 1,
 		MinSpreadBps:     *minSpreadBps,
 		TargetFillRate:   decimal.NewFromFloat(0.1), // 10% default
+		Improvement:      decimal.NewFromFloat(*improvement),
+		ImprovementReferenceSize: decimal.NewFromFloat(*improvementReferenceSize),
 	}
 	
 	// Print configuration
@@ -99,6 +103,8 @@ func RunMarketMaker(args []string) {
 	log.Printf("  Refresh Interval: %s", config.RefreshInterval)
 	log.Printf("  Max Position: %s", config.MaxPositionSize)
 	log.Printf("  Max Exposure: %s", config.MaxTotalExposure)
+	log.Printf("  Improvement: %s", config.Improvement)
+	log.Printf("  Improvement Reference Size: %s", config.ImprovementReferenceSize)
 	
 	if *dryRun {
 		log.Println("Dry run mode - exiting without starting market maker")

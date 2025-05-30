@@ -23,6 +23,9 @@ type MarketMakerExchange interface {
 	
 	// Get current positions
 	GetPositions() ([]ExchangePosition, error)
+	
+	// Get order book for an instrument
+	GetOrderBook(instrument string) (*MarketMakerOrderBook, error)
 }
 
 // TickerUpdate represents a real-time ticker update
@@ -35,6 +38,19 @@ type TickerUpdate struct {
 	LastPrice    decimal.Decimal
 	MarkPrice    decimal.Decimal
 	Timestamp    time.Time
+}
+
+// OrderBookLevel represents a price level in the order book
+type OrderBookLevel struct {
+	Price decimal.Decimal
+	Size  decimal.Decimal
+}
+
+// MarketMakerOrderBook represents the order book for an instrument
+type MarketMakerOrderBook struct {
+	Bids []OrderBookLevel // Sorted by price descending (best bid first)
+	Asks []OrderBookLevel // Sorted by price ascending (best ask first)
+	Timestamp time.Time
 }
 
 // MarketMakerOrder represents an active order for market making
@@ -73,6 +89,10 @@ type MarketMakerConfig struct {
 	// Performance
 	MinSpreadBps     int             // Minimum spread to maintain profitability
 	TargetFillRate   decimal.Decimal // Target fill rate (0-1)
+	
+	// Quote improvement
+	Improvement      decimal.Decimal // Amount to improve quotes by (tighten spread)
+	ImprovementReferenceSize decimal.Decimal // Minimum size for best bid/ask selection
 }
 
 // DefaultMarketMakerConfig returns a default configuration
@@ -89,6 +109,8 @@ func DefaultMarketMakerConfig() *MarketMakerConfig {
 		MaxOrdersPerSide: 1,
 		MinSpreadBps:     5, // 0.05%
 		TargetFillRate:   decimal.NewFromFloat(0.1), // 10% fill rate target
+		Improvement:      decimal.NewFromFloat(0.1), // Default 0.1 improvement
+		ImprovementReferenceSize: decimal.NewFromFloat(0), // Default 0 (use any size)
 	}
 }
 

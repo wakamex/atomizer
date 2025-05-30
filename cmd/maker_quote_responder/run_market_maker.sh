@@ -17,6 +17,8 @@ REFRESH_SEC="${REFRESH_SEC:-1}"
 MAX_POSITION="${MAX_POSITION:-1.0}"
 MAX_EXPOSURE="${MAX_EXPOSURE:-10.0}"
 MIN_SPREAD_BPS="${MIN_SPREAD_BPS:-1000}"
+IMPROVEMENT="${IMPROVEMENT:-0.1}"
+IMPROVEMENT_REFERENCE_SIZE="${IMPROVEMENT_REFERENCE_SIZE:-0}"
 TEST_MODE="${TEST_MODE:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -63,6 +65,8 @@ CMD="$CMD -refresh=$REFRESH_SEC"
 CMD="$CMD -max-position=$MAX_POSITION"
 CMD="$CMD -max-exposure=$MAX_EXPOSURE"
 CMD="$CMD -min-spread=$MIN_SPREAD_BPS"
+CMD="$CMD -improvement=$IMPROVEMENT"
+CMD="$CMD -improvement-reference-size=$IMPROVEMENT_REFERENCE_SIZE"
 
 if [[ "$TEST_MODE" == "true" ]]; then
     CMD="$CMD -test"
@@ -93,6 +97,8 @@ echo "  Size: $SIZE"
 echo "  Refresh: ${REFRESH_SEC}s"
 echo "  Max Position: $MAX_POSITION"
 echo "  Max Exposure: $MAX_EXPOSURE"
+echo "  Improvement: $IMPROVEMENT"
+echo "  Improvement Reference Size: $IMPROVEMENT_REFERENCE_SIZE"
 echo ""
 
 # Run the market maker
