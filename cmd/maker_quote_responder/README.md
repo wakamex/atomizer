@@ -20,8 +20,12 @@ atomizer rfq
 # With specific exchange
 atomizer rfq -e derive --derive-key $PRIVATE_KEY --derive-wallet $WALLET
 
+# Run the market maker
+atomizer market-maker --expiry 20250601 --strikes 2600,2800,3000
+
 # Get help
 atomizer help rfq
+atomizer help market-maker
 ```
 
 ### Direct Binary Usage
@@ -45,6 +49,11 @@ atomizer help rfq
     # For Deribit - Option 2: Ed25519 asymmetric authentication
     DERIBIT_CLIENT_ID=your_client_id
     ASYMMETRIC_PRIVATE_KEY=your_ed25519_private_key
+    
+    # For Derive - Required credentials
+    DERIVE_PRIVATE_KEY=your_ethereum_private_key
+    DERIVE_WALLET_ADDRESS=your_derive_wallet_address
+    DERIVE_SUBACCOUNT_ID=50400  # Your specific subaccount ID
     ```
     Replace the placeholders with your actual credentials. Only include credentials for the exchange you're using.
 
