@@ -26,14 +26,14 @@ We collect real-time order book data from both Derive and Deribit exchanges usin
 
 3. **Python Dependencies**:
    ```bash
-   cd /code/atomizer/cmd/analyze_correlation
+   cd /code/atomizer/scripts/market_analysis
    pip install -r requirements.txt
    ```
 
 ### Basic Analysis
 
 ```bash
-cd /code/atomizer/cmd/analyze_correlation
+cd /code/atomizer/scripts/market_analysis
 
 # Analyze bid prices for the last hour
 python analyze_correlation.py
@@ -209,7 +209,7 @@ atomizer monitor --derive --deribit --instruments "ETH-*"
 ### Orderbook Inspector
 View real-time orderbook data:
 ```bash
-cd cmd/analyze_correlation
+cd scripts/market_analysis
 python3 inspect_orderbook.py --instrument "ETH-20250601-2600-C" --exchange derive
 ```
 
@@ -219,7 +219,7 @@ python3 inspect_orderbook.py --instrument "ETH-20250601-2600-C" --exchange deriv
     --compare "ETH-1JUN25-2600-C:deribit"
 ```
 
-See [cmd/analyze_correlation/README.md](cmd/analyze_correlation/README.md) for more examples.
+See [scripts/market_analysis/README.md](scripts/market_analysis/README.md) for more examples.
 
 ## Next Steps
 

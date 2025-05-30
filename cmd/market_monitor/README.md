@@ -101,12 +101,12 @@ Data is stored in VictoriaMetrics in Prometheus format:
 
 ## Data Analysis
 
-After collecting data, use the analysis tools in `cmd/analyze_correlation/`:
+After collecting data, use the analysis tools in `scripts/market_analysis/`:
 
 - **analyze_correlation.py**: Analyze price correlation between exchanges
 - **inspect_orderbook.py**: View real-time and historical orderbook data
 
-See [analyze_correlation/README.md](../analyze_correlation/README.md) for details.
+See [analyze_correlation/README.md](../scripts/market_analysis/README.md) for details.
 
 ## Architecture
 
