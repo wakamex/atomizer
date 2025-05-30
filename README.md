@@ -8,6 +8,7 @@ Atomizer is a comprehensive command-line toolkit for options trading, providing 
 - **RFQ Responder**: Automated quote generation for Request-for-Quote systems
 - **Market Analysis**: Real-time liquidity analysis with spread metrics and volatility comparisons
 - **Position Management**: Track inventory and P&L across multiple exchanges
+- **Market Data Monitor**: Collect and store real-time order book data with time-series database integration
 - **Multi-Exchange Support**: Works with Derive/Lyra and Deribit (more coming soon)
 - **Automated Hedging**: Hedge positions automatically when trades are executed
 
@@ -24,6 +25,7 @@ combo:
 - [x] maker_quote_response.go (connect and quote)
 - [x] hedging integration with Deribit
 - [x] market analysis tools (inventory, markets, send_quote)
+- [x] market data monitoring with time-series storage
 
 
 ## Installation
@@ -76,6 +78,9 @@ atomizer markets --underlying ETH
 
 # Send a single quote
 atomizer send-quote -i ETH-20250530-2800-C -s buy -p 100 --size 0.1
+
+# Monitor market data
+atomizer market-monitor start --exchanges derive,deribit --instruments ETH-*
 ```
 
 ## Commands
@@ -121,6 +126,34 @@ Lists available markets and instruments with filtering options.
 
 ### `atomizer send-quote`
 Utility to send individual quotes/orders for testing.
+
+### `atomizer market-monitor`
+Collects and stores real-time market data from multiple exchanges.
+
+**Key features:**
+- Real-time order book depth collection (configurable depth)
+- Spot price feeds for accurate USD conversion
+- Time-series data storage with VictoriaMetrics
+- Multi-exchange support with instrument name conversion
+- Debug mode for troubleshooting WebSocket connections
+
+**Subcommands:**
+- `setup` - Download and configure VictoriaMetrics database
+- `start` - Start collecting market data
+- `stats` - Show current statistics (coming soon)
+- `export` - Export data using PromQL queries (coming soon)
+
+**Example:**
+```bash
+# Set up VictoriaMetrics
+atomizer market-monitor setup
+
+# Start monitoring with order book depth
+atomizer market-monitor start --orderbook --depth 10 --instruments ETH-*-C --debug
+
+# Monitor specific instruments
+atomizer market-monitor start --exchanges deribit --instruments ETH-1JUN25-2600-C
+```
 
 ## Architecture
 

@@ -58,6 +58,13 @@ go build -o ../../bin/send_quote
 cd ../..
 echo -e "${GREEN}✓ send_quote${NC}"
 
+# Build market_monitor
+echo -e "${YELLOW}Building market_monitor...${NC}"
+cd cmd/market_monitor
+go build -o ../../bin/market_monitor
+cd ../..
+echo -e "${GREEN}✓ market_monitor${NC}"
+
 echo -e "${GREEN}Build complete!${NC}"
 echo ""
 echo "To use the unified CLI, add the bin directory to your PATH:"
