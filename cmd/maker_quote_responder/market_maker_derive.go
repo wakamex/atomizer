@@ -1,10 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math/big"
+	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,13 +20,18 @@ import (
 
 // DeriveMarketMakerExchange implements MarketMakerExchange for Derive/Lyra
 type DeriveMarketMakerExchange struct {
-	wsClient    *DeriveWSClient
+	wsClient     *DeriveWSClient
 	subaccountID uint64
+	privateKey   string // Store private key for order signing
 	
 	// Ticker subscriptions
 	tickerConn   *websocket.Conn
 	tickerMu     sync.Mutex
 	subscriptions map[string]bool
+	
+	// Cache instrument details to avoid repeated fetches
+	instrumentCache map[string]*DeriveInstrumentDetails
+	cacheMu         sync.RWMutex
 }
 
 // NewDeriveMarketMakerExchange creates a new Derive exchange adapter
@@ -31,155 +42,322 @@ func NewDeriveMarketMakerExchange(privateKey, walletAddress string) (*DeriveMark
 		return nil, fmt.Errorf("failed to create WebSocket client: %w", err)
 	}
 	
-	// Get default subaccount
-	subaccountID := wsClient.GetDefaultSubaccount()
+	// Get subaccount ID from environment or use default
+	var subaccountID uint64
+	if subaccountIDStr := os.Getenv("DERIVE_SUBACCOUNT_ID"); subaccountIDStr != "" {
+		parsed, err := strconv.ParseUint(subaccountIDStr, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid DERIVE_SUBACCOUNT_ID: %w", err)
+		}
+		subaccountID = parsed
+		log.Printf("Using subaccount ID from environment: %d", subaccountID)
+	} else {
+		// Fall back to default subaccount
+		subaccountID = wsClient.GetDefaultSubaccount()
+		log.Printf("Using default subaccount ID: %d", subaccountID)
+	}
 	
 	return &DeriveMarketMakerExchange{
-		wsClient:      wsClient,
-		subaccountID:  subaccountID,
-		subscriptions: make(map[string]bool),
+		wsClient:        wsClient,
+		subaccountID:    subaccountID,
+		privateKey:      privateKey,
+		subscriptions:   make(map[string]bool),
+		instrumentCache: make(map[string]*DeriveInstrumentDetails),
 	}, nil
 }
 
-// SubscribeTickers subscribes to real-time ticker updates
+// getInstrumentDetails gets instrument details from cache or fetches if needed
+func (d *DeriveMarketMakerExchange) getInstrumentDetails(instrument string) (*DeriveInstrumentDetails, error) {
+	// Check cache first
+	d.cacheMu.RLock()
+	details, exists := d.instrumentCache[instrument]
+	d.cacheMu.RUnlock()
+	
+	if exists {
+		return details, nil
+	}
+	
+	// Fetch if not cached
+	details, err := FetchDeriveInstrumentDetails(instrument)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Store in cache
+	d.cacheMu.Lock()
+	d.instrumentCache[instrument] = details
+	d.cacheMu.Unlock()
+	
+	return details, nil
+}
+
+// SubscribeTickers polls ticker updates for given instruments
 func (d *DeriveMarketMakerExchange) SubscribeTickers(ctx context.Context, instruments []string) (<-chan TickerUpdate, error) {
 	tickerChan := make(chan TickerUpdate, 100)
 	
-	// Connect to ticker WebSocket
-	wsURL := "wss://api.lyra.finance/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to ticker WebSocket: %w", err)
-	}
-	
-	d.tickerMu.Lock()
-	d.tickerConn = conn
-	d.tickerMu.Unlock()
-	
-	// Subscribe to each instrument
+	// Store subscriptions
 	for _, instrument := range instruments {
-		subscribeMsg := map[string]interface{}{
-			"jsonrpc": "2.0",
-			"method":  "public/subscribe",
-			"params": map[string]interface{}{
-				"instrument_name": instrument,
-				"channels": []string{
-					"ticker",
-					"orderbook", // For best bid/ask updates
-				},
-			},
-			"id": fmt.Sprintf("sub_%s_%d", instrument, time.Now().UnixNano()),
-		}
-		
-		if err := conn.WriteJSON(subscribeMsg); err != nil {
-			conn.Close()
-			return nil, fmt.Errorf("failed to subscribe to %s: %w", instrument, err)
-		}
-		
 		d.subscriptions[instrument] = true
-		log.Printf("Subscribed to ticker updates for %s", instrument)
+		log.Printf("Starting ticker polling for %s", instrument)
 	}
 	
-	// Start processing messages
-	go d.processTickerMessages(ctx, conn, tickerChan)
+	// Start polling for each instrument
+	go d.pollTickers(ctx, instruments, tickerChan)
 	
 	return tickerChan, nil
 }
 
-// processTickerMessages handles incoming WebSocket messages
-func (d *DeriveMarketMakerExchange) processTickerMessages(ctx context.Context, conn *websocket.Conn, tickerChan chan<- TickerUpdate) {
+// pollTickers polls for ticker updates
+func (d *DeriveMarketMakerExchange) pollTickers(ctx context.Context, instruments []string, tickerChan chan<- TickerUpdate) {
 	defer close(tickerChan)
-	defer conn.Close()
+	
+	ticker := time.NewTicker(500 * time.Millisecond) // Poll every 500ms
+	defer ticker.Stop()
 	
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-			// Set read deadline
-			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-			
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				log.Printf("Error reading ticker message: %v", err)
-				return
-			}
-			
-			// Parse message
-			var msg struct {
-				Method string          `json:"method"`
-				Params json.RawMessage `json:"params"`
-			}
-			
-			if err := json.Unmarshal(message, &msg); err != nil {
-				log.Printf("Failed to parse ticker message: %v", err)
-				continue
-			}
-			
-			// Handle ticker updates
-			if msg.Method == "ticker" || msg.Method == "orderbook" {
-				d.handleTickerUpdate(msg.Params, tickerChan)
+		case <-ticker.C:
+			// Poll each instrument
+			for _, instrument := range instruments {
+				go func(inst string) {
+					ticker, err := d.fetchTicker(inst)
+					if err != nil {
+						// Only log periodically to avoid spam
+						if time.Now().Unix() % 10 == 0 {
+							log.Printf("Failed to fetch ticker for %s: %v", inst, err)
+						}
+						return
+					}
+					
+					// Send update
+					select {
+					case tickerChan <- *ticker:
+					default:
+						log.Printf("Ticker channel full, dropping update for %s", inst)
+					}
+				}(instrument)
 			}
 		}
 	}
 }
 
-// handleTickerUpdate processes ticker/orderbook updates
-func (d *DeriveMarketMakerExchange) handleTickerUpdate(params json.RawMessage, tickerChan chan<- TickerUpdate) {
-	var data struct {
-		InstrumentName string          `json:"instrument_name"`
-		BestBid        decimal.Decimal `json:"best_bid_price"`
-		BestBidAmount  decimal.Decimal `json:"best_bid_amount"`
-		BestAsk        decimal.Decimal `json:"best_ask_price"`
-		BestAskAmount  decimal.Decimal `json:"best_ask_amount"`
-		LastPrice      decimal.Decimal `json:"last_price"`
-		MarkPrice      decimal.Decimal `json:"mark_price"`
+// fetchTicker fetches ticker data for a single instrument
+func (d *DeriveMarketMakerExchange) fetchTicker(instrument string) (*TickerUpdate, error) {
+	url := "https://api.lyra.finance/public/get_ticker"
+	payload := map[string]string{"instrument_name": instrument}
+	jsonData, _ := json.Marshal(payload)
+	
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 	
-	if err := json.Unmarshal(params, &data); err != nil {
-		log.Printf("Failed to parse ticker data: %v", err)
-		return
+	var result struct {
+		Result struct {
+			InstrumentName string `json:"instrument_name"`
+			BestBidPrice   string `json:"best_bid_price"`
+			BestAskPrice   string `json:"best_ask_price"`
+			BestBidAmount  string `json:"best_bid_amount"`
+			BestAskAmount  string `json:"best_ask_amount"`
+			LastPrice      string `json:"last_price"`
+			MarkPrice      string `json:"mark_price"`
+		} `json:"result"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	
-	update := TickerUpdate{
-		Instrument:  data.InstrumentName,
-		BestBid:     data.BestBid,
-		BestBidSize: data.BestBidAmount,
-		BestAsk:     data.BestAsk,
-		BestAskSize: data.BestAskAmount,
-		LastPrice:   data.LastPrice,
-		MarkPrice:   data.MarkPrice,
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	
+	if result.Error != nil {
+		return nil, fmt.Errorf("API error: %s", result.Error.Message)
+	}
+	
+	// Convert strings to decimals
+	bestBid, _ := decimal.NewFromString(result.Result.BestBidPrice)
+	bestAsk, _ := decimal.NewFromString(result.Result.BestAskPrice)
+	bestBidAmount, _ := decimal.NewFromString(result.Result.BestBidAmount)
+	bestAskAmount, _ := decimal.NewFromString(result.Result.BestAskAmount)
+	lastPrice, _ := decimal.NewFromString(result.Result.LastPrice)
+	markPrice, _ := decimal.NewFromString(result.Result.MarkPrice)
+	
+	return &TickerUpdate{
+		Instrument:  result.Result.InstrumentName,
+		BestBid:     bestBid,
+		BestBidSize: bestBidAmount,
+		BestAsk:     bestAsk,
+		BestAskSize: bestAskAmount,
+		LastPrice:   lastPrice,
+		MarkPrice:   markPrice,
 		Timestamp:   time.Now(),
-	}
-	
-	select {
-	case tickerChan <- update:
-	default:
-		log.Printf("Ticker channel full, dropping update for %s", data.InstrumentName)
-	}
+	}, nil
 }
 
 // PlaceLimitOrder places a limit order on Derive
 func (d *DeriveMarketMakerExchange) PlaceLimitOrder(instrument string, side string, price, amount decimal.Decimal) (string, error) {
-	// Convert to Derive order format
-	order := map[string]interface{}{
-		"subaccount_id":   d.subaccountID,
-		"instrument_name": instrument,
-		"direction":       side, // "buy" or "sell"
-		"order_type":      "limit",
-		"limit_price":     price.String(),
-		"amount":          amount.String(),
-		"time_in_force":   "gtc", // Good till cancelled
-		"mmp":             true,  // Market maker protection
+	// Create order directly using our existing WebSocket connection
+	// This avoids creating a new connection for each order
+	
+	// Get auth from our existing client
+	auth := d.wsClient.GetAuth()
+	
+	// Get instrument details
+	instrumentDetails, err := d.getInstrumentDetails(instrument)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch instrument: %w", err)
 	}
 	
-	// Sign and submit order
-	response, err := d.wsClient.SubmitOrder(order)
+	// Create signed action
+	action := &DeriveAction{
+		SubaccountID:       d.subaccountID,
+		Owner:              d.wsClient.GetWallet(),
+		Signer:             auth.GetAddress(),
+		SignatureExpirySec: time.Now().Unix() + 3600,
+		Nonce:              uint64(time.Now().UnixMilli())*1000 + uint64(time.Now().Nanosecond()%1000),
+		ModuleAddress:      "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b",
+		AssetAddress:       instrumentDetails.BaseAssetAddress,
+		SubID:              instrumentDetails.BaseAssetSubID,
+		LimitPrice:         func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(price.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
+		Amount:             func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(amount.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
+		MaxFee:             new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18)), // 100 USDC max fee
+		RecipientID:        d.subaccountID,
+		IsBid:              side == "buy",
+	}
+	
+	// Sign the action
+	if err := action.Sign(auth.GetPrivateKey()); err != nil {
+		return "", fmt.Errorf("failed to sign action: %w", err)
+	}
+	
+	// Prepare order request
+	orderReq := map[string]interface{}{
+		"instrument_name":      instrument,
+		"direction":           side,
+		"order_type":         "limit",
+		"time_in_force":      "gtc",
+		"mmp":                true, // Market maker protection
+		"subaccount_id":      d.subaccountID,
+		"nonce":              action.Nonce,
+		"signer":             action.Signer,
+		"signature_expiry_sec": action.SignatureExpirySec,
+		"signature":          action.Signature,
+		"limit_price":        fmt.Sprintf("%.6f", price.InexactFloat64()),
+		"amount":             fmt.Sprintf("%.6f", amount.InexactFloat64()),
+		"max_fee":            "100",
+	}
+	
+	// Submit order via our existing WebSocket client
+	orderResp, err := d.wsClient.SubmitOrder(orderReq)
 	if err != nil {
 		return "", fmt.Errorf("failed to submit order: %w", err)
 	}
 	
-	return response.Result.OrderID, nil
+	if orderResp.Error != nil {
+		return "", fmt.Errorf("order error: %s", orderResp.Error.Message)
+	}
+	
+	return orderResp.Result.OrderID, nil
+}
+
+// ReplaceOrder replaces an existing order with new parameters
+func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument string, side string, price, amount decimal.Decimal) (string, error) {
+	// Get auth from our existing client
+	auth := d.wsClient.GetAuth()
+	
+	// Get instrument details
+	instrumentDetails, err := d.getInstrumentDetails(instrument)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch instrument: %w", err)
+	}
+	
+	// Create signed action for the new order
+	action := &DeriveAction{
+		SubaccountID:       d.subaccountID,
+		Owner:              d.wsClient.GetWallet(),
+		Signer:             auth.GetAddress(),
+		SignatureExpirySec: time.Now().Unix() + 3600,
+		Nonce:              uint64(time.Now().UnixMilli())*1000 + uint64(time.Now().Nanosecond()%1000),
+		ModuleAddress:      "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b",
+		AssetAddress:       instrumentDetails.BaseAssetAddress,
+		SubID:              instrumentDetails.BaseAssetSubID,
+		LimitPrice:         func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(price.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
+		Amount:             func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(amount.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
+		MaxFee:             new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18)), // 100 USDC max fee
+		RecipientID:        d.subaccountID,
+		IsBid:              side == "buy",
+	}
+	
+	// Sign the action
+	if err := action.Sign(auth.GetPrivateKey()); err != nil {
+		return "", fmt.Errorf("failed to sign action: %w", err)
+	}
+	
+	// Prepare replace request
+	replaceReq := map[string]interface{}{
+		// Cancel parameters - use the correct field name
+		"order_id_to_cancel": orderID,
+		
+		// New order parameters
+		"instrument_name":      instrument,
+		"direction":           side,
+		"order_type":         "limit",
+		"time_in_force":      "gtc",
+		"mmp":                true, // Market maker protection
+		"subaccount_id":      d.subaccountID,
+		"nonce":              action.Nonce,
+		"signer":             action.Signer,
+		"signature_expiry_sec": action.SignatureExpirySec,
+		"signature":          action.Signature,
+		"limit_price":        fmt.Sprintf("%.6f", price.InexactFloat64()),
+		"amount":             fmt.Sprintf("%.6f", amount.InexactFloat64()),
+		"max_fee":            "100",
+	}
+	
+	// Send replace request
+	id := fmt.Sprintf("%d", time.Now().UnixMilli())
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "private/replace",
+		"params":  replaceReq,
+		"id":      id,
+	}
+	
+	log.Printf("Sending replace order request for order %s", orderID)
+	respChan := d.wsClient.sendRequest(req)
+	
+	select {
+	case resp := <-respChan:
+		var result struct {
+			Result *struct {
+				OrderID string `json:"order_id"`
+			} `json:"result"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(resp, &result); err != nil {
+			return "", fmt.Errorf("failed to parse response: %w", err)
+		}
+		if result.Error != nil {
+			return "", fmt.Errorf("replace error: %s", result.Error.Message)
+		}
+		if result.Result != nil {
+			return result.Result.OrderID, nil
+		}
+		return "", fmt.Errorf("no order ID in response")
+	case <-time.After(5 * time.Second):
+		return "", fmt.Errorf("replace order timeout")
+	}
 }
 
 // CancelOrder cancels an order on Derive

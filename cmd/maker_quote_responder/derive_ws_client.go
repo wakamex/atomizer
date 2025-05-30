@@ -341,6 +341,16 @@ func (c *DeriveWSClient) GetDefaultSubaccount() uint64 {
 	return 0
 }
 
+// GetAuth returns the auth instance for signing
+func (c *DeriveWSClient) GetAuth() *DeriveAuth {
+	return c.auth
+}
+
+// GetWallet returns the wallet address
+func (c *DeriveWSClient) GetWallet() string {
+	return c.wallet
+}
+
 // GetPositions fetches all positions for the subaccount
 func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interface{}, error) {
 	id := fmt.Sprintf("%d", time.Now().UnixMilli())
