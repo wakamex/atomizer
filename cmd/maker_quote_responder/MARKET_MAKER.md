@@ -80,6 +80,13 @@ MarketMaker
   - Required for Derive exchange
   - If not provided, uses `DERIVE_WALLET_ADDRESS` environment variable
 
+### Derive Specific Configuration
+
+For Derive, the following environment variables are required:
+- `DERIVE_PRIVATE_KEY`: Ethereum private key for signing orders
+- `DERIVE_WALLET_ADDRESS`: Your Derive wallet address
+- `DERIVE_SUBACCOUNT_ID`: The subaccount ID to use (e.g., 50400)
+
 ### Utility
 
 - **`-dry-run`**: Print configuration without starting the market maker
@@ -116,13 +123,13 @@ If the calculated quotes violate the minimum spread requirement:
 
 ### Basic Market Making
 
-Make markets on specific ETH call strikes expiring June 6, 2025:
+Make markets on specific ETH call strikes expiring June 1, 2025:
 
 ```bash
 ./maker_quote_responder market-maker \
-  -expiry 20250606 \
-  -strikes 2800,3000,3200 \
-  -size 2.0
+  -expiry 20250601 \
+  -strikes 2600,2800,3000 \
+  -size 0.1
 ```
 
 ### All Strikes with Tight Spreads
@@ -169,10 +176,11 @@ Set credentials via environment:
 ```bash
 export DERIVE_PRIVATE_KEY="your-private-key"
 export DERIVE_WALLET_ADDRESS="your-wallet-address"
+export DERIVE_SUBACCOUNT_ID=50400
 
 ./maker_quote_responder market-maker \
-  -expiry 20250606 \
-  -strikes 3000
+  -expiry 20250601 \
+  -strikes 2600,2800,3000
 ```
 
 ### Using the Shell Script
@@ -237,6 +245,32 @@ Monitor logs to ensure proper operation:
 3. **Order Validation**: Checks risk limits before placing orders
 4. **Connection Monitoring**: Handles WebSocket disconnections gracefully
 5. **Atomic Order Updates**: Ensures bid/ask pairs are updated together
+6. **Smart Order Updates**: Only cancels/replaces orders if market moves > 0.5% (CancelThreshold)
+
+## Technical Implementation Details
+
+### Derive Order Signing
+
+The market maker uses EIP-712 signing for Derive orders:
+
+1. **Fetch Instrument Details**: Gets base asset address and sub ID
+2. **Create Action**: Builds order action with all parameters
+3. **EIP-712 Signing**: Signs with domain separator and action typehash
+4. **Submit Order**: Sends signed order via WebSocket
+
+Key parameters for Derive orders:
+- `subaccount_id`: From DERIVE_SUBACCOUNT_ID env var
+- `max_fee`: Set to 100 USDC (in wei)
+- `signature_expiry_sec`: 1 hour from order creation
+- `nonce`: Unique value using timestamp + nanoseconds
+- `signer`: EOA address that signs the order
+
+### WebSocket Management
+
+- Uses mutex protection for concurrent writes
+- Maintains separate connections for orders and ticker data
+- Implements heartbeat/ping-pong for connection health
+- Automatic reconnection on disconnection
 
 ## Future Improvements
 

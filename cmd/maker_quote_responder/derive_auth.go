@@ -99,6 +99,11 @@ func (d *DeriveAuth) GetAddress() string {
 	return d.address.Hex()
 }
 
+// GetPrivateKey returns the private key for signing
+func (d *DeriveAuth) GetPrivateKey() *ecdsa.PrivateKey {
+	return d.privateKey
+}
+
 // SignOrderPayload signs an order payload for self-custodial requests
 // This is used for the second auth step in order placement
 func (d *DeriveAuth) SignOrderPayload(payload interface{}) (string, error) {
