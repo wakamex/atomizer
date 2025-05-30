@@ -13,12 +13,13 @@ var commands = map[string]struct {
 	binary      string
 	description string
 }{
-	"rfq":          {"maker_quote_responder", "Run RFQ responder for automated quoting"},
-	"market-maker": {"maker_quote_responder", "Run market maker with continuous quoting"},
-	"analyze":      {"analyze_options", "Analyze options market liquidity and pricing"},
-	"inventory":    {"inventory", "Show current positions and P&L"},
-	"markets":      {"markets", "Display available markets and instruments"},
-	"send-quote":   {"send_quote", "Send a single quote to an exchange"},
+	"rfq":            {"maker_quote_responder", "Run RFQ responder for automated quoting"},
+	"market-maker":   {"maker_quote_responder", "Run market maker with continuous quoting"},
+	"analyze":        {"analyze_options", "Analyze options market liquidity and pricing"},
+	"inventory":      {"inventory", "Show current positions and P&L"},
+	"markets":        {"markets", "Display available markets and instruments"},
+	"send-quote":     {"send_quote", "Send a single quote to an exchange"},
+	"market-monitor": {"market_monitor", "Monitor and store real-time market data"},
 }
 
 func main() {
@@ -102,7 +103,7 @@ func showHelp() {
 	fmt.Println("Available commands:")
 	
 	// Print commands in a consistent order
-	cmds := []string{"rfq", "market-maker", "analyze", "inventory", "markets", "send-quote"}
+	cmds := []string{"rfq", "market-maker", "analyze", "inventory", "markets", "send-quote", "market-monitor"}
 	for _, cmd := range cmds {
 		info := commands[cmd]
 		fmt.Printf("  %-13s %s\n", cmd, info.description)
@@ -195,5 +196,24 @@ func showCommandHelp(command string) {
 		fmt.Println("Options:")
 		fmt.Println("  -e, --exchange NAME     Exchange to use")
 		fmt.Println("  --type TYPE             Order type (limit, market)")
+		
+	case "market-monitor":
+		fmt.Println("Usage: atomizer market-monitor [subcommand] [options]")
+		fmt.Println()
+		fmt.Println("Subcommands:")
+		fmt.Println("  setup                   Download and configure VictoriaMetrics")
+		fmt.Println("  start                   Start monitoring market data")
+		fmt.Println("  stats                   Show current statistics")
+		fmt.Println("  export                  Export data using PromQL")
+		fmt.Println()
+		fmt.Println("Start Options:")
+		fmt.Println("  --interval DURATION     Collection interval (default: 5s)")
+		fmt.Println("  --exchanges LIST        Comma-separated exchanges (default: derive,deribit)")
+		fmt.Println("  --instruments PATTERN   Instrument patterns (default: ETH-*,BTC-*)")
+		fmt.Println("  --vm-url URL            VictoriaMetrics URL (default: http://localhost:8428)")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  atomizer market-monitor setup")
+		fmt.Println("  atomizer market-monitor start --interval 10s --instruments ETH-*")
 	}
 }
