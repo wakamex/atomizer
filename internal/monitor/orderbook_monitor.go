@@ -87,6 +87,15 @@ func (m *OrderBookMonitor) Start() error {
 		go m.deriveWSCollectionLoop()
 	}
 	
+	// Start spot price collection loop
+	if m.spotCollector != nil {
+		log.Println("Starting spot price collection loop")
+		m.wg.Add(1)
+		go m.spotCollectionLoop()
+	} else {
+		log.Println("WARNING: Spot collector is nil, not starting spot collection loop")
+	}
+	
 	return nil
 }
 
@@ -195,6 +204,61 @@ func (m *OrderBookMonitor) deriveWSCollectionLoop() {
 			m.collectDeriveOrderBooks()
 		}
 	}
+}
+
+func (m *OrderBookMonitor) spotCollectionLoop() {
+	defer m.wg.Done()
+	
+	// Use a faster interval for spot prices as they change frequently
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	
+	log.Printf("Starting spot price collection every 10s")
+	
+	// Initial collection
+	m.collectSpotPrices()
+	
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.collectSpotPrices()
+		}
+	}
+}
+
+func (m *OrderBookMonitor) collectSpotPrices() {
+	spotPrices := m.spotCollector.GetAllSpotPrices()
+	
+	if len(spotPrices) == 0 {
+		log.Println("No spot prices available yet")
+		return
+	}
+	
+	// Convert spot prices to metrics
+	metrics := make([]Metric, 0, len(spotPrices))
+	for currency, spot := range spotPrices {
+		// Create a metric for the spot price
+		metric := Metric{
+			Exchange:   "derive",
+			Instrument: fmt.Sprintf("%s-SPOT", currency),
+			Timestamp:  spot.Timestamp,
+			BidPrice:   spot.Price,
+			AskPrice:   spot.Price,
+			LastPrice:  spot.Price,
+		}
+		metrics = append(metrics, metric)
+	}
+	
+	// Write to storage using the regular VMStorage
+	storage := NewVMStorage(m.config.VictoriaMetricsURL)
+	if err := storage.Write(metrics); err != nil {
+		log.Printf("Failed to write spot prices: %v", err)
+		return
+	}
+	
+	log.Printf("Collected spot prices: %v", spotPrices)
 }
 
 func (m *OrderBookMonitor) collectDeriveOrderBooks() {

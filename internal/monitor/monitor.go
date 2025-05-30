@@ -21,13 +21,14 @@ type Config struct {
 }
 
 type Monitor struct {
-	config     *Config
-	collectors map[string]Collector
-	storage    *VMStorage
-	vmProcess  *exec.Cmd
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	config        *Config
+	collectors    map[string]Collector
+	spotCollector *DeriveSpotCollector
+	storage       *VMStorage
+	vmProcess     *exec.Cmd
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
 }
 
 type Collector interface {
@@ -75,6 +76,19 @@ func New(config *Config) (*Monitor, error) {
 	// Initialize storage
 	m.storage = NewVMStorage(config.VictoriaMetricsURL)
 
+	// Initialize spot collector
+	spotCollector, err := NewDeriveSpotCollector()
+	if err != nil {
+		log.Printf("Warning: Failed to create spot collector: %v", err)
+		// Don't fail completely, just log the error
+	} else {
+		m.spotCollector = spotCollector
+		// Subscribe to ETH and BTC spot feeds
+		if err := spotCollector.Subscribe([]string{"ETH", "BTC"}); err != nil {
+			log.Printf("Warning: Failed to subscribe to spot feeds: %v", err)
+		}
+	}
+
 	return m, nil
 }
 
@@ -98,12 +112,24 @@ func (m *Monitor) Start() error {
 		go m.collectionLoop(collector)
 	}
 
+	// Start spot price collection loop
+	if m.spotCollector != nil {
+		m.wg.Add(1)
+		go m.spotCollectionLoop()
+	}
+
 	return nil
 }
 
 func (m *Monitor) Stop() error {
 	m.cancel()
 	m.wg.Wait()
+
+	if m.spotCollector != nil {
+		if err := m.spotCollector.Close(); err != nil {
+			log.Printf("Error closing spot collector: %v", err)
+		}
+	}
 
 	if m.vmProcess != nil {
 		log.Println("Stopping VictoriaMetrics...")
@@ -217,4 +243,57 @@ func (m *Monitor) Export(format string, output string, start, end time.Time) err
 	// - Write to output file
 	
 	return fmt.Errorf("export not yet implemented")
+}
+
+func (m *Monitor) spotCollectionLoop() {
+	defer m.wg.Done()
+	
+	// Use a faster interval for spot prices as they change frequently
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	
+	log.Printf("Starting spot price collection every 10s")
+	
+	// Initial collection
+	m.collectSpotPrices()
+	
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			m.collectSpotPrices()
+		}
+	}
+}
+
+func (m *Monitor) collectSpotPrices() {
+	spotPrices := m.spotCollector.GetAllSpotPrices()
+	
+	if len(spotPrices) == 0 {
+		return
+	}
+	
+	// Convert spot prices to metrics
+	metrics := make([]Metric, 0, len(spotPrices))
+	for currency, spot := range spotPrices {
+		// Create a metric for the spot price
+		metric := Metric{
+			Exchange:   "derive",
+			Instrument: fmt.Sprintf("%s-SPOT", currency),
+			Timestamp:  spot.Timestamp,
+			BidPrice:   spot.Price,
+			AskPrice:   spot.Price,
+			LastPrice:  spot.Price,
+		}
+		metrics = append(metrics, metric)
+	}
+	
+	// Write to storage
+	if err := m.storage.Write(metrics); err != nil {
+		log.Printf("Failed to write spot prices: %v", err)
+		return
+	}
+	
+	log.Printf("Collected spot prices: %v", spotPrices)
 }
