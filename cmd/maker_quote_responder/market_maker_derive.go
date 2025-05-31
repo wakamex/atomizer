@@ -453,97 +453,27 @@ func (d *DeriveMarketMakerExchange) GetPositions() ([]ExchangePosition, error) {
 	return positions, nil
 }
 
-// GetOrderBook fetches the order book for an instrument
+// GetOrderBook returns the cached orderbook from WebSocket subscription
 func (d *DeriveMarketMakerExchange) GetOrderBook(instrument string) (*MarketMakerOrderBook, error) {
-	// Fetch instrument details to get the correct instrument ID
-	_, err := d.getInstrumentDetails(instrument)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get instrument details: %w", err)
+	// Get cached orderbook from WebSocket client
+	orderbook := d.wsClient.GetOrderBook(instrument)
+	if orderbook == nil {
+		return nil, fmt.Errorf("no orderbook data available for %s", instrument)
 	}
 	
-	// Make HTTP request to get orderbook
-	// Using the REST API endpoint since WebSocket might not have orderbook subscription
-	url := "https://api-testnet.lyra.finance/public/get_orderbook"
-	
-	reqBody := map[string]interface{}{
-		"instrument_name": instrument,
-		"depth": 20, // Get top 20 levels
+	// Convert to MarketMakerOrderBook format
+	mmOrderBook := &MarketMakerOrderBook{
+		Bids:      orderbook.Bids,
+		Asks:      orderbook.Asks,
+		Timestamp: orderbook.Timestamp,
 	}
 	
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-	
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	
-	req.Header.Set("Content-Type", "application/json")
-	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch orderbook: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-	
-	var result struct {
-		Result struct {
-			Bids [][]json.Number `json:"bids"`
-			Asks [][]json.Number `json:"asks"`
-		} `json:"result"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	
-	if result.Error != nil {
-		return nil, fmt.Errorf("API error: %s", result.Error.Message)
-	}
-	
-	// Convert to our MarketMakerOrderBook format
-	orderBook := &MarketMakerOrderBook{
-		Bids: make([]OrderBookLevel, 0, len(result.Result.Bids)),
-		Asks: make([]OrderBookLevel, 0, len(result.Result.Asks)),
-		Timestamp: time.Now(),
-	}
-	
-	// Parse bids
-	for _, bid := range result.Result.Bids {
-		if len(bid) >= 2 {
-			price, _ := decimal.NewFromString(bid[0].String())
-			size, _ := decimal.NewFromString(bid[1].String())
-			orderBook.Bids = append(orderBook.Bids, OrderBookLevel{
-				Price: price,
-				Size:  size,
-			})
-		}
-	}
-	
-	// Parse asks
-	for _, ask := range result.Result.Asks {
-		if len(ask) >= 2 {
-			price, _ := decimal.NewFromString(ask[0].String())
-			size, _ := decimal.NewFromString(ask[1].String())
-			orderBook.Asks = append(orderBook.Asks, OrderBookLevel{
-				Price: price,
-				Size:  size,
-			})
-		}
-	}
-	
-	return orderBook, nil
+	return mmOrderBook, nil
+}
+
+// SubscribeOrderBook subscribes to orderbook updates for an instrument
+func (d *DeriveMarketMakerExchange) SubscribeOrderBook(instrument string) error {
+	return d.wsClient.SubscribeOrderBook(instrument, 20) // Subscribe with depth 20
 }
 
 // Helper functions to extract values from map

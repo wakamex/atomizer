@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 // DeriveWSClient handles WebSocket connection to Derive
@@ -17,6 +19,19 @@ type DeriveWSClient struct {
 	subaccounts  []int
 	mu           sync.Mutex
 	requests     map[string]chan json.RawMessage
+	
+	// Orderbook data
+	orderbooks   map[string]*OrderBookData
+	orderbookMu  sync.RWMutex
+	orderbookSubs map[string]bool
+}
+
+// OrderBookData represents orderbook state
+type OrderBookData struct {
+	Bids      []OrderBookLevel
+	Asks      []OrderBookLevel
+	Timestamp time.Time
+	ChangeID  int64
 }
 
 // NewDeriveWSClient creates a new Derive WebSocket client
@@ -27,9 +42,11 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 	}
 
 	client := &DeriveWSClient{
-		auth:     auth,
-		wallet:   deriveWallet,
-		requests: make(map[string]chan json.RawMessage),
+		auth:         auth,
+		wallet:       deriveWallet,
+		requests:     make(map[string]chan json.RawMessage),
+		orderbooks:   make(map[string]*OrderBookData),
+		orderbookSubs: make(map[string]bool),
 	}
 
 	// Connect to Derive WebSocket
@@ -173,6 +190,18 @@ func (c *DeriveWSClient) handleMessages() {
 			return
 		}
 
+		// First try to parse as a subscription update
+		var subMsg struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(message, &subMsg); err == nil && subMsg.Method == "subscription" {
+			// Handle subscription update
+			c.handleSubscriptionUpdate(subMsg.Params)
+			continue
+		}
+
+		// Otherwise handle as a response
 		var msg struct {
 			ID     string          `json:"id"`
 			Result json.RawMessage `json:"result"`
@@ -191,6 +220,76 @@ func (c *DeriveWSClient) handleMessages() {
 		}
 		c.mu.Unlock()
 	}
+}
+
+// handleSubscriptionUpdate processes subscription updates (orderbook, trades, etc)
+func (c *DeriveWSClient) handleSubscriptionUpdate(params json.RawMessage) {
+	var update struct {
+		Channel string `json:"channel"`
+		Data    struct {
+			Timestamp      int64           `json:"timestamp"`
+			InstrumentName string          `json:"instrument_name"`
+			Bids           [][]json.Number `json:"bids"` // [price, size]
+			Asks           [][]json.Number `json:"asks"` // [price, size]
+			ChangeID       int64           `json:"change_id"`
+		} `json:"data"`
+	}
+	
+	if err := json.Unmarshal(params, &update); err != nil {
+		debugLog("[Derive WS] Failed to parse subscription update: %v", err)
+		return
+	}
+	
+	// Check if this is an orderbook update
+	if strings.HasPrefix(update.Channel, "orderbook.") {
+		c.updateOrderBook(update.Data.InstrumentName, &update.Data)
+	}
+}
+
+// updateOrderBook updates the cached orderbook for an instrument
+func (c *DeriveWSClient) updateOrderBook(instrument string, data *struct {
+	Timestamp      int64           `json:"timestamp"`
+	InstrumentName string          `json:"instrument_name"`
+	Bids           [][]json.Number `json:"bids"`
+	Asks           [][]json.Number `json:"asks"`
+	ChangeID       int64           `json:"change_id"`
+}) {
+	// Convert bids and asks to OrderBookLevel
+	bids := make([]OrderBookLevel, 0, len(data.Bids))
+	for _, bid := range data.Bids {
+		if len(bid) >= 2 {
+			price, _ := decimal.NewFromString(bid[0].String())
+			amount, _ := decimal.NewFromString(bid[1].String())
+			bids = append(bids, OrderBookLevel{
+				Price: price,
+				Size:  amount,
+			})
+		}
+	}
+	
+	asks := make([]OrderBookLevel, 0, len(data.Asks))
+	for _, ask := range data.Asks {
+		if len(ask) >= 2 {
+			price, _ := decimal.NewFromString(ask[0].String())
+			amount, _ := decimal.NewFromString(ask[1].String())
+			asks = append(asks, OrderBookLevel{
+				Price: price,
+				Size:  amount,
+			})
+		}
+	}
+	
+	// Update cached orderbook
+	c.orderbookMu.Lock()
+	c.orderbooks[instrument] = &OrderBookData{
+		Bids:      bids,
+		Asks:      asks,
+		Timestamp: time.Unix(0, data.Timestamp*1e6), // Convert microseconds to nanoseconds
+		ChangeID:  data.ChangeID,
+	}
+	c.orderbookMu.Unlock()
+	
+	debugLog("[Derive WS] Updated orderbook for %s: %d bids, %d asks", instrument, len(bids), len(asks))
 }
 
 // sendRequest sends a request and returns a channel for the response
@@ -400,4 +499,67 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 // Close closes the WebSocket connection
 func (c *DeriveWSClient) Close() error {
 	return c.conn.Close()
+}
+
+// SubscribeOrderBook subscribes to orderbook updates for an instrument
+func (c *DeriveWSClient) SubscribeOrderBook(instrument string, depth int) error {
+	// Determine depth parameter
+	depthParam := "10"
+	if depth > 10 && depth <= 20 {
+		depthParam = "20"
+	} else if depth > 20 {
+		depthParam = "100"
+	}
+	
+	channel := fmt.Sprintf("orderbook.%s.1.%s", instrument, depthParam)
+	
+	// Check if already subscribed
+	c.orderbookMu.Lock()
+	if c.orderbookSubs[channel] {
+		c.orderbookMu.Unlock()
+		return nil
+	}
+	c.orderbookSubs[channel] = true
+	c.orderbookMu.Unlock()
+	
+	// Subscribe via WebSocket
+	msg := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "subscribe",
+		"params": map[string]interface{}{
+			"channels": []string{channel},
+		},
+		"id": fmt.Sprintf("subscribe_%s_%d", instrument, time.Now().UnixNano()),
+	}
+	
+	c.mu.Lock()
+	err := c.conn.WriteJSON(msg)
+	c.mu.Unlock()
+	
+	if err != nil {
+		c.orderbookMu.Lock()
+		delete(c.orderbookSubs, channel)
+		c.orderbookMu.Unlock()
+		return fmt.Errorf("failed to subscribe to orderbook: %w", err)
+	}
+	
+	debugLog("[Derive WS] Subscribed to orderbook channel: %s", channel)
+	return nil
+}
+
+// GetOrderBook returns the cached orderbook for an instrument
+func (c *DeriveWSClient) GetOrderBook(instrument string) *OrderBookData {
+	c.orderbookMu.RLock()
+	defer c.orderbookMu.RUnlock()
+	
+	if ob, ok := c.orderbooks[instrument]; ok {
+		// Return a copy to avoid race conditions
+		return &OrderBookData{
+			Bids:      append([]OrderBookLevel{}, ob.Bids...),
+			Asks:      append([]OrderBookLevel{}, ob.Asks...),
+			Timestamp: ob.Timestamp,
+			ChangeID:  ob.ChangeID,
+		}
+	}
+	return nil
 }
