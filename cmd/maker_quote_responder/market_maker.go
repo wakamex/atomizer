@@ -33,6 +33,9 @@ type MarketMaker struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	mu     sync.RWMutex
+	
+	// Error suppression
+	orderbookErrorLogged map[string]bool
 }
 
 // NewMarketMaker creates a new market maker instance
@@ -49,17 +52,13 @@ func NewMarketMaker(config *MarketMakerConfig, exchange MarketMakerExchange) *Ma
 		stats:              MarketMakerStats{BidAskSpread: make(map[string]decimal.Decimal)},
 		ctx:                ctx,
 		cancel:             cancel,
+		orderbookErrorLogged: make(map[string]bool),
 	}
 }
 
 // Start begins market making
 func (mm *MarketMaker) Start() error {
-	log.Printf("Starting market maker for %d instruments", len(mm.config.Instruments))
-	log.Printf("Strategy: Maintaining exactly 1 buy and 1 sell limit order per instrument")
-	log.Printf("Quote size: %s, Improvement: %s", mm.config.QuoteSize, mm.config.Improvement)
-	if mm.config.ImprovementReferenceSize.GreaterThan(decimal.Zero) {
-		log.Printf("Reference size filter: %s", mm.config.ImprovementReferenceSize)
-	}
+	log.Printf("Starting market maker: %d instruments, 1 buy + 1 sell per instrument", len(mm.config.Instruments))
 	
 	// Load existing positions
 	if err := mm.loadPositions(); err != nil {
@@ -180,8 +179,18 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 		var err error
 		orderBook, err = mm.exchange.GetOrderBook(instrument)
 		if err != nil {
-			log.Printf("Failed to fetch orderbook for %s: %v, using ticker data", instrument, err)
+			mm.mu.Lock()
+			if !mm.orderbookErrorLogged[instrument] {
+				log.Printf("Failed to fetch orderbook for %s: %v, using ticker data", instrument, err)
+				mm.orderbookErrorLogged[instrument] = true
+			}
+			mm.mu.Unlock()
 			// Continue with ticker data only
+		} else {
+			// Clear error flag on success
+			mm.mu.Lock()
+			delete(mm.orderbookErrorLogged, instrument)
+			mm.mu.Unlock()
 		}
 	}
 	
@@ -223,7 +232,7 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 				// Update our tracking
 				mm.updateOrderTracking(bidOrder.OrderID, newOrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
 				replacedBid = true
-				log.Printf("Replaced bid order %s with %s for %s @ %s", bidOrder.OrderID, newOrderID, instrument, bidPrice)
+				debugLog("Replaced bid order %s with %s for %s @ %s", bidOrder.OrderID, newOrderID, instrument, bidPrice)
 			}
 		}
 		
@@ -235,7 +244,7 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 				// Update our tracking
 				mm.updateOrderTracking(askOrder.OrderID, newOrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
 				replacedAsk = true
-				log.Printf("Replaced ask order %s with %s for %s @ %s", askOrder.OrderID, newOrderID, instrument, askPrice)
+				debugLog("Replaced ask order %s with %s for %s @ %s", askOrder.OrderID, newOrderID, instrument, askPrice)
 			}
 		}
 		
@@ -358,7 +367,7 @@ func (mm *MarketMaker) placeQuotes(instrument string, bidPrice, askPrice decimal
 	mm.stats.OrdersPlaced += 2
 	mm.mu.Unlock()
 	
-	log.Printf("Placed quotes for %s: Bid %.4f, Ask %.4f", instrument, bidPrice, askPrice)
+	debugLog("Placed quotes for %s: Bid %.4f, Ask %.4f", instrument, bidPrice, askPrice)
 	
 	return nil
 }
@@ -462,7 +471,7 @@ func (mm *MarketMaker) placeSingleQuote(instrument, side string, price decimal.D
 	mm.stats.OrdersPlaced++
 	mm.mu.Unlock()
 	
-	log.Printf("Placed %s order %s for %s @ %s", side, orderID, instrument, price)
+	debugLog("Placed %s order %s for %s @ %s", side, orderID, instrument, price)
 	return nil
 }
 
@@ -625,29 +634,37 @@ func (mm *MarketMaker) statsReporter() {
 			mm.stats.UptimeSeconds = int64(time.Since(startTime).Seconds())
 			mm.stats.LastUpdate = time.Now()
 			
-			log.Printf("Market Maker Stats: Orders placed: %d, Cancelled: %d, Filled: %d, Uptime: %ds",
+			// Count active orders
+			activeCount := 0
+			for _, orders := range mm.ordersByInstrument {
+				if len(orders) > 0 {
+					activeCount++
+				}
+			}
+			
+			// Concise stats output
+			log.Printf("Stats: Orders=%d/%d/%d (placed/cancelled/filled), Active=%d/%d instruments, Uptime=%ds",
 				mm.stats.OrdersPlaced,
 				mm.stats.OrdersCancelled,
 				mm.stats.OrdersFilled,
+				activeCount,
+				len(mm.config.Instruments),
 				mm.stats.UptimeSeconds)
 			
-			// Log current order state
-			activeCount := 0
-			for instrument, orders := range mm.ordersByInstrument {
-				if len(orders) > 0 {
-					activeCount++
-					var bidPrice, askPrice string = "none", "none"
-					if bidOrder, hasBid := orders["buy"]; hasBid {
-						bidPrice = bidOrder.Price.String()
+			// Detailed order state in debug mode only
+			if debugMode {
+				for instrument, orders := range mm.ordersByInstrument {
+					if len(orders) > 0 {
+						var bidPrice, askPrice string = "none", "none"
+						if bidOrder, hasBid := orders["buy"]; hasBid {
+							bidPrice = bidOrder.Price.String()
+						}
+						if askOrder, hasAsk := orders["sell"]; hasAsk {
+							askPrice = askOrder.Price.String()
+						}
+						debugLog("  %s: bid=%s, ask=%s", instrument, bidPrice, askPrice)
 					}
-					if askOrder, hasAsk := orders["sell"]; hasAsk {
-						askPrice = askOrder.Price.String()
-					}
-					log.Printf("  %s: bid=%s, ask=%s", instrument, bidPrice, askPrice)
 				}
-			}
-			if activeCount == 0 {
-				log.Printf("  No active orders")
 			}
 			mm.mu.RUnlock()
 		}

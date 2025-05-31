@@ -16,6 +16,21 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+// Global debug mode flag
+var debugMode bool
+
+// SetDebugMode sets the global debug mode
+func SetDebugMode(enabled bool) {
+	debugMode = enabled
+}
+
+// debugLog logs a message only if debug mode is enabled
+func debugLog(format string, args ...interface{}) {
+	if debugMode {
+		log.Printf(format, args...)
+	}
+}
+
 // DeriveInstrumentDetails represents instrument details from Derive API
 type DeriveInstrumentDetails struct {
 	InstrumentName    string `json:"instrument_name"`
@@ -47,8 +62,8 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 	domainSeparator := common.HexToHash("0xd96e5f90797da7ec8dc4e276260c7f3f87fedf68775fbe1ef116e996fc60441b")
 	actionTypehash := common.HexToHash("0x4d7a9f27c403ff9c0f19bce61d76d82f9aa29f8d6d4b0c5474607d9770d1af17")
 	
-	log.Printf("[EIP-712] Using domain separator: %s", domainSeparator.Hex())
-	log.Printf("[EIP-712] Using action typehash: %s", actionTypehash.Hex())
+	debugLog("[EIP-712] Using domain separator: %s", domainSeparator.Hex())
+	debugLog("[EIP-712] Using action typehash: %s", actionTypehash.Hex())
 	
 	// Encode module data
 	subID, _ := new(big.Int).SetString(a.SubID, 10)
@@ -67,7 +82,7 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 	
 	// Hash module data
 	moduleDataHash := crypto.Keccak256Hash(moduleData)
-	log.Printf("[EIP-712] Module data hash: %s", moduleDataHash.Hex())
+	debugLog("[EIP-712] Module data hash: %s", moduleDataHash.Hex())
 	
 	// Encode action
 	actionData, err := encodeAction(
@@ -80,19 +95,19 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 		common.HexToAddress(a.Owner),
 		common.HexToAddress(a.Signer),
 	)
-	log.Printf("[EIP-712] Action data encoded, length: %d", len(actionData))
+	debugLog("[EIP-712] Action data encoded, length: %d", len(actionData))
 	if err != nil {
 		return err
 	}
 	
 	// Create typed data hash
 	actionHash := crypto.Keccak256Hash(actionData)
-	log.Printf("[EIP-712] Action hash: %s", actionHash.Hex())
+	debugLog("[EIP-712] Action hash: %s", actionHash.Hex())
 	
 	message := append([]byte{0x19, 0x01}, domainSeparator.Bytes()...)
 	message = append(message, actionHash.Bytes()...)
 	typedDataHash := crypto.Keccak256Hash(message)
-	log.Printf("[EIP-712] Final typed data hash to sign: %s", typedDataHash.Hex())
+	debugLog("[EIP-712] Final typed data hash to sign: %s", typedDataHash.Hex())
 	
 	// Sign
 	signature, err := crypto.Sign(typedDataHash.Bytes(), privateKey)

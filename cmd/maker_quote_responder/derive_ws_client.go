@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -35,7 +34,7 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 
 	// Connect to Derive WebSocket
 	wsURL := "wss://api.lyra.finance/ws"
-	log.Printf("[Derive WS] Connecting to %s", wsURL)
+	debugLog("[Derive WS] Connecting to %s", wsURL)
 	
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
@@ -45,16 +44,16 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 	
 	// Set up ping/pong handlers with label
 	conn.SetPingHandler(func(appData string) error {
-		log.Printf("[Derive WS] Ping received, sending Pong")
+		debugLog("[Derive WS] Ping received, sending Pong")
 		err := conn.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(5*time.Second))
 		if err != nil {
-			log.Printf("[Derive WS] Error sending pong: %v", err)
+			debugLog("[Derive WS] Error sending pong: %v", err)
 		}
 		return nil
 	})
 	
 	conn.SetPongHandler(func(appData string) error {
-		log.Printf("[Derive WS] Pong received")
+		debugLog("[Derive WS] Pong received")
 		return nil
 	})
 
@@ -89,7 +88,7 @@ func (c *DeriveWSClient) heartbeat() {
 			
 			// Send ping
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("[Derive WS] Error sending ping: %v", err)
+				debugLog("[Derive WS] Error sending ping: %v", err)
 				c.mu.Unlock()
 				return
 			}
@@ -97,7 +96,7 @@ func (c *DeriveWSClient) heartbeat() {
 			
 		case <-time.After(60 * time.Second):
 			// If we haven't received anything in 60 seconds, consider the connection dead
-			log.Printf("[Derive WS] No activity for 60 seconds, connection may be dead")
+			debugLog("[Derive WS] No activity for 60 seconds, connection may be dead")
 			return
 		}
 	}
@@ -115,10 +114,10 @@ func (c *DeriveWSClient) login() error {
 
 	ownerEOA := c.auth.GetAddress()
 	
-	log.Printf("[Derive WS] Login - EOA: %s", ownerEOA)
-	log.Printf("[Derive WS] Login - Derive Wallet: %s", c.wallet)
-	log.Printf("[Derive WS] Login - Timestamp: %d (%s)", timestamp, timestampStr)
-	log.Printf("[Derive WS] Login - Signature: %s", signature)
+	debugLog("[Derive WS] Login - EOA: %s", ownerEOA)
+	debugLog("[Derive WS] Login - Derive Wallet: %s", c.wallet)
+	debugLog("[Derive WS] Login - Timestamp: %d (%s)", timestamp, timestampStr)
+	debugLog("[Derive WS] Login - Signature: %s", signature)
 
 	// Use JSON-RPC format - server expects it
 	loginReq := map[string]interface{}{
@@ -132,14 +131,14 @@ func (c *DeriveWSClient) login() error {
 		"id": fmt.Sprintf("%d", time.Now().UnixMilli()),
 	}
 
-	log.Printf("[Derive WS] Sending login request: %+v", loginReq)
+	debugLog("[Derive WS] Sending login request: %+v", loginReq)
 
 	// Send login request
 	respChan := c.sendRequest(loginReq)
 	
 	select {
 	case resp := <-respChan:
-		log.Printf("[Derive WS] Login response: %s", string(resp))
+		debugLog("[Derive WS] Login response: %s", string(resp))
 		
 		var result struct {
 			Result []int `json:"result"` // Array of subaccount IDs
@@ -158,7 +157,7 @@ func (c *DeriveWSClient) login() error {
 		// Store subaccount IDs
 		c.subaccounts = result.Result
 		
-		log.Printf("[Derive WS] Login successful. Subaccounts: %v", result.Result)
+		debugLog("[Derive WS] Login successful. Subaccounts: %v", result.Result)
 		return nil
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("login timeout")
@@ -170,7 +169,7 @@ func (c *DeriveWSClient) handleMessages() {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			log.Printf("[Derive WS] Read error: %v", err)
+			debugLog("[Derive WS] Read error: %v", err)
 			return
 		}
 
@@ -180,7 +179,7 @@ func (c *DeriveWSClient) handleMessages() {
 			Error  json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("[Derive WS] Failed to parse message: %v", err)
+			debugLog("[Derive WS] Failed to parse message: %v", err)
 			continue
 		}
 
@@ -205,10 +204,10 @@ func (c *DeriveWSClient) sendRequest(req map[string]interface{}) <-chan json.Raw
 
 	// Marshal to JSON to log exact format
 	jsonBytes, _ := json.Marshal(req)
-	log.Printf("[Derive WS] Sending JSON: %s", string(jsonBytes))
+	debugLog("[Derive WS] Sending JSON: %s", string(jsonBytes))
 	
 	if err := c.conn.WriteJSON(req); err != nil {
-		log.Printf("[Derive WS] Failed to send request: %v", err)
+		debugLog("[Derive WS] Failed to send request: %v", err)
 		close(respChan)
 		return respChan
 	}
@@ -228,13 +227,13 @@ func (c *DeriveWSClient) SubmitOrder(order map[string]interface{}) (*DeriveOrder
 		"id":     id,
 	}
 
-	log.Printf("[Derive WS] Submitting order: %+v", order)
+	debugLog("[Derive WS] Submitting order: %+v", order)
 	
 	respChan := c.sendRequest(req)
 	
 	select {
 	case resp := <-respChan:
-		log.Printf("[Derive WS] Order response: %s", string(resp))
+		debugLog("[Derive WS] Order response: %s", string(resp))
 		
 		// First check if there's an error
 		var errorCheck struct {
@@ -279,7 +278,7 @@ func (c *DeriveWSClient) SubmitOrder(order map[string]interface{}) (*DeriveOrder
 			result.Result.InstrumentName = instrumentName
 		}
 		
-		log.Printf("[Derive WS] Order placed - ID: %s, Status: %s", result.Result.OrderID, result.Result.Status)
+		debugLog("[Derive WS] Order placed - ID: %s, Status: %s", result.Result.OrderID, result.Result.Status)
 		
 		return result, nil
 		
@@ -301,7 +300,7 @@ func (c *DeriveWSClient) GetOpenOrders(subaccountID uint64) ([]map[string]interf
 		"id": id,
 	}
 	
-	log.Printf("[Derive WS] Querying open orders for subaccount %d", subaccountID)
+	debugLog("[Derive WS] Querying open orders for subaccount %d", subaccountID)
 	
 	respChan := c.sendRequest(req)
 	
@@ -364,7 +363,7 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 		"id": id,
 	}
 	
-	log.Printf("[Derive WS] Querying positions for subaccount %d", subaccountID)
+	debugLog("[Derive WS] Querying positions for subaccount %d", subaccountID)
 	
 	respChan := c.sendRequest(req)
 	
@@ -389,7 +388,7 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 			return nil, fmt.Errorf("get positions error: %s", result.Error.Message)
 		}
 		
-		log.Printf("[Derive WS] Found %d positions", len(result.Result.Positions))
+		debugLog("[Derive WS] Found %d positions", len(result.Result.Positions))
 		
 		return result.Result.Positions, nil
 		
