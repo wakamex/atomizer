@@ -58,9 +58,9 @@ type DeriveAction struct {
 
 // Sign signs the action using EIP-712
 func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
-	// Protocol constants for mainnet
-	domainSeparator := common.HexToHash("0xd96e5f90797da7ec8dc4e276260c7f3f87fedf68775fbe1ef116e996fc60441b")
-	actionTypehash := common.HexToHash("0x4d7a9f27c403ff9c0f19bce61d76d82f9aa29f8d6d4b0c5474607d9770d1af17")
+	// Protocol constants for mainnet - updated based on testing
+	domainSeparator := common.HexToHash("0x8f06151ae86a1e59b6cf39212fb0978551b4dcafefd44e3a8b860a9c0b1e6141")
+	actionTypehash := common.HexToHash("0x5147386a8c7e1c2fb020f0ad9cd5e9c6e28dbce75c86560d0956e15bc50e3041")
 	
 	debugLog("[EIP-712] Using domain separator: %s", domainSeparator.Hex())
 	debugLog("[EIP-712] Using action typehash: %s", actionTypehash.Hex())

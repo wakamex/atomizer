@@ -307,20 +307,21 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 		// Cancel parameters - use the correct field name
 		"order_id_to_cancel": orderID,
 		
-		// New order parameters
+		// New order parameters (all required fields)
 		"instrument_name":      instrument,
 		"direction":           side,
 		"order_type":         "limit",
 		"time_in_force":      "gtc",
-		"mmp":                true, // Market maker protection
+		"amount":             fmt.Sprintf("%.6f", amount.InexactFloat64()),
+		"limit_price":        fmt.Sprintf("%.6f", price.InexactFloat64()),
+		"max_fee":            "100",
 		"subaccount_id":      d.subaccountID,
 		"nonce":              action.Nonce,
-		"signer":             action.Signer,
 		"signature_expiry_sec": action.SignatureExpirySec,
+		"owner":              action.Owner,
+		"signer":             action.Signer,
 		"signature":          action.Signature,
-		"limit_price":        fmt.Sprintf("%.6f", price.InexactFloat64()),
-		"amount":             fmt.Sprintf("%.6f", amount.InexactFloat64()),
-		"max_fee":            "100",
+		"mmp":                true, // Market maker protection
 	}
 	
 	// Send replace request
@@ -345,6 +346,11 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 				CancelledOrder *struct {
 					OrderID string `json:"order_id"`
 				} `json:"cancelled_order"`
+				CreateOrderError *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+					Data    string `json:"data"`
+				} `json:"create_order_error"`
 			} `json:"result"`
 			Error *struct {
 				Message string `json:"message"`
@@ -356,8 +362,35 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 		if result.Error != nil {
 			return "", fmt.Errorf("replace error: %s", result.Error.Message)
 		}
-		if result.Result != nil && result.Result.Order != nil {
-			return result.Result.Order.OrderID, nil
+		if result.Result != nil {
+			// Check for partial failure: cancelled but not created
+			if result.Result.CancelledOrder != nil && result.Result.Order == nil {
+				// Log the partial failure
+				log.Printf("WARNING: Replace order partially failed - cancelled order %s but failed to create new order", 
+					result.Result.CancelledOrder.OrderID)
+				
+				if result.Result.CreateOrderError != nil {
+					log.Printf("Create order error: Code=%d, Message=%s, Data=%s", 
+						result.Result.CreateOrderError.Code, 
+						result.Result.CreateOrderError.Message,
+						result.Result.CreateOrderError.Data)
+				}
+				
+				// Attempt recovery by placing a new order
+				log.Printf("Attempting to recover by placing a new order: %s %s %.6f @ %.6f", 
+					instrument, side, amount.InexactFloat64(), price.InexactFloat64())
+				
+				return d.PlaceOrder(instrument, side, price, amount)
+			}
+			
+			// Success case: both cancelled and created
+			if result.Result.Order != nil {
+				if result.Result.CancelledOrder != nil {
+					log.Printf("Successfully replaced order %s with new order %s", 
+						result.Result.CancelledOrder.OrderID, result.Result.Order.OrderID)
+				}
+				return result.Result.Order.OrderID, nil
+			}
 		}
 		return "", fmt.Errorf("no order ID in response")
 	case <-time.After(5 * time.Second):
