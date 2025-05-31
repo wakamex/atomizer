@@ -380,7 +380,7 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 				log.Printf("Attempting to recover by placing a new order: %s %s %.6f @ %.6f", 
 					instrument, side, amount.InexactFloat64(), price.InexactFloat64())
 				
-				return d.PlaceOrder(instrument, side, price, amount)
+				return d.PlaceLimitOrder(instrument, side, price, amount)
 			}
 			
 			// Success case: both cancelled and created
