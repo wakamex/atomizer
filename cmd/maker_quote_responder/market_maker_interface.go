@@ -15,6 +15,9 @@ type MarketMakerExchange interface {
 	// Place a limit order
 	PlaceLimitOrder(instrument string, side string, price, amount decimal.Decimal) (string, error)
 	
+	// Replace an existing order with new parameters (atomic cancel + create)
+	ReplaceOrder(orderID string, instrument string, side string, price, amount decimal.Decimal) (string, error)
+	
 	// Cancel an order
 	CancelOrder(orderID string) error
 	

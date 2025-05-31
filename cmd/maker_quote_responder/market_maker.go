@@ -15,9 +15,9 @@ type MarketMaker struct {
 	config   *MarketMakerConfig
 	exchange MarketMakerExchange
 	
-	// Order tracking
+	// Order tracking - maintains exactly 1 buy and 1 sell order per instrument
 	activeOrders map[string]*MarketMakerOrder // orderID -> Order
-	ordersByInstrument map[string]map[string]*MarketMakerOrder // instrument -> side -> orders
+	ordersByInstrument map[string]map[string]*MarketMakerOrder // instrument -> side -> order (only one per side)
 	
 	// Market data
 	latestTickers map[string]*TickerUpdate
@@ -55,6 +55,11 @@ func NewMarketMaker(config *MarketMakerConfig, exchange MarketMakerExchange) *Ma
 // Start begins market making
 func (mm *MarketMaker) Start() error {
 	log.Printf("Starting market maker for %d instruments", len(mm.config.Instruments))
+	log.Printf("Strategy: Maintaining exactly 1 buy and 1 sell limit order per instrument")
+	log.Printf("Quote size: %s, Improvement: %s", mm.config.QuoteSize, mm.config.Improvement)
+	if mm.config.ImprovementReferenceSize.GreaterThan(decimal.Zero) {
+		log.Printf("Reference size filter: %s", mm.config.ImprovementReferenceSize)
+	}
 	
 	// Load existing positions
 	if err := mm.loadPositions(); err != nil {
@@ -189,12 +194,80 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 		return nil
 	}
 	
-	// Cancel existing orders
-	mm.cancelOrdersForInstrument(instrument)
+	// Get existing orders for this instrument
+	mm.mu.RLock()
+	existingOrders := mm.ordersByInstrument[instrument]
+	mm.mu.RUnlock()
 	
-	// Place new orders
-	if err := mm.placeQuotes(instrument, bidPrice, askPrice); err != nil {
-		return fmt.Errorf("failed to place quotes: %w", err)
+	// If we have existing orders, try to replace them
+	if existingOrders != nil && len(existingOrders) > 0 {
+		var bidOrder, askOrder *MarketMakerOrder
+		
+		// Find existing bid and ask orders
+		for side, order := range existingOrders {
+			if side == "buy" {
+				bidOrder = order
+			} else if side == "sell" {
+				askOrder = order
+			}
+		}
+		
+		// Replace existing orders if they exist
+		var replacedBid, replacedAsk bool
+		
+		if bidOrder != nil {
+			newOrderID, err := mm.exchange.ReplaceOrder(bidOrder.OrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
+			if err != nil {
+				log.Printf("Failed to replace bid order %s: %v, will cancel and recreate", bidOrder.OrderID, err)
+			} else {
+				// Update our tracking
+				mm.updateOrderTracking(bidOrder.OrderID, newOrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
+				replacedBid = true
+				log.Printf("Replaced bid order %s with %s for %s @ %s", bidOrder.OrderID, newOrderID, instrument, bidPrice)
+			}
+		}
+		
+		if askOrder != nil {
+			newOrderID, err := mm.exchange.ReplaceOrder(askOrder.OrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
+			if err != nil {
+				log.Printf("Failed to replace ask order %s: %v, will cancel and recreate", askOrder.OrderID, err)
+			} else {
+				// Update our tracking
+				mm.updateOrderTracking(askOrder.OrderID, newOrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
+				replacedAsk = true
+				log.Printf("Replaced ask order %s with %s for %s @ %s", askOrder.OrderID, newOrderID, instrument, askPrice)
+			}
+		}
+		
+		// If we successfully replaced both orders, we're done
+		if replacedBid && replacedAsk {
+			return nil
+		}
+		
+		// Otherwise, fall back to cancel and recreate for failed replacements
+		if !replacedBid && bidOrder != nil {
+			mm.cancelOrder(bidOrder.OrderID)
+		}
+		if !replacedAsk && askOrder != nil {
+			mm.cancelOrder(askOrder.OrderID)
+		}
+		
+		// Place new orders for any that weren't replaced
+		if !replacedBid {
+			if err := mm.placeSingleQuote(instrument, "buy", bidPrice); err != nil {
+				log.Printf("Failed to place bid order: %v", err)
+			}
+		}
+		if !replacedAsk {
+			if err := mm.placeSingleQuote(instrument, "sell", askPrice); err != nil {
+				log.Printf("Failed to place ask order: %v", err)
+			}
+		}
+	} else {
+		// No existing orders, place new ones
+		if err := mm.placeQuotes(instrument, bidPrice, askPrice); err != nil {
+			return fmt.Errorf("failed to place quotes: %w", err)
+		}
 	}
 	
 	return nil
@@ -309,6 +382,88 @@ func (mm *MarketMaker) trackOrder(orderID, instrument, side string, price, amoun
 		mm.ordersByInstrument[instrument] = make(map[string]*MarketMakerOrder)
 	}
 	mm.ordersByInstrument[instrument][side] = order
+}
+
+// updateOrderTracking updates our internal tracking when an order is replaced
+func (mm *MarketMaker) updateOrderTracking(oldOrderID, newOrderID, instrument, side string, price, amount decimal.Decimal) {
+	mm.mu.Lock()
+	defer mm.mu.Unlock()
+	
+	// Remove old order
+	delete(mm.activeOrders, oldOrderID)
+	
+	// Add new order
+	newOrder := &MarketMakerOrder{
+		OrderID:    newOrderID,
+		Instrument: instrument,
+		Side:       side,
+		Price:      price,
+		Amount:     amount,
+		Status:     "open",
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	
+	mm.activeOrders[newOrderID] = newOrder
+	
+	// Update instrument tracking
+	if mm.ordersByInstrument[instrument] == nil {
+		mm.ordersByInstrument[instrument] = make(map[string]*MarketMakerOrder)
+	}
+	mm.ordersByInstrument[instrument][side] = newOrder
+}
+
+// cancelOrder cancels a single order
+func (mm *MarketMaker) cancelOrder(orderID string) {
+	if err := mm.exchange.CancelOrder(orderID); err != nil {
+		log.Printf("Failed to cancel order %s: %v", orderID, err)
+	} else {
+		mm.mu.Lock()
+		if order, exists := mm.activeOrders[orderID]; exists {
+			delete(mm.activeOrders, orderID)
+			if instrumentOrders, exists := mm.ordersByInstrument[order.Instrument]; exists {
+				delete(instrumentOrders, order.Side)
+				if len(instrumentOrders) == 0 {
+					delete(mm.ordersByInstrument, order.Instrument)
+				}
+			}
+			mm.stats.OrdersCancelled++
+		}
+		mm.mu.Unlock()
+	}
+}
+
+// placeSingleQuote places a single buy or sell order
+func (mm *MarketMaker) placeSingleQuote(instrument, side string, price decimal.Decimal) error {
+	orderID, err := mm.exchange.PlaceLimitOrder(instrument, side, price, mm.config.QuoteSize)
+	if err != nil {
+		return err
+	}
+	
+	// Track the order
+	mm.mu.Lock()
+	order := &MarketMakerOrder{
+		OrderID:    orderID,
+		Instrument: instrument,
+		Side:       side,
+		Price:      price,
+		Amount:     mm.config.QuoteSize,
+		Status:     "open",
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+	mm.activeOrders[orderID] = order
+	
+	if mm.ordersByInstrument[instrument] == nil {
+		mm.ordersByInstrument[instrument] = make(map[string]*MarketMakerOrder)
+	}
+	mm.ordersByInstrument[instrument][side] = order
+	
+	mm.stats.OrdersPlaced++
+	mm.mu.Unlock()
+	
+	log.Printf("Placed %s order %s for %s @ %s", side, orderID, instrument, price)
+	return nil
 }
 
 // cancelOrdersForInstrument cancels all orders for an instrument
@@ -475,6 +630,25 @@ func (mm *MarketMaker) statsReporter() {
 				mm.stats.OrdersCancelled,
 				mm.stats.OrdersFilled,
 				mm.stats.UptimeSeconds)
+			
+			// Log current order state
+			activeCount := 0
+			for instrument, orders := range mm.ordersByInstrument {
+				if len(orders) > 0 {
+					activeCount++
+					var bidPrice, askPrice string = "none", "none"
+					if bidOrder, hasBid := orders["buy"]; hasBid {
+						bidPrice = bidOrder.Price.String()
+					}
+					if askOrder, hasAsk := orders["sell"]; hasAsk {
+						askPrice = askOrder.Price.String()
+					}
+					log.Printf("  %s: bid=%s, ask=%s", instrument, bidPrice, askPrice)
+				}
+			}
+			if activeCount == 0 {
+				log.Printf("  No active orders")
+			}
 			mm.mu.RUnlock()
 		}
 	}

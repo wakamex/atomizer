@@ -339,7 +339,12 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 	case resp := <-respChan:
 		var result struct {
 			Result *struct {
-				OrderID string `json:"order_id"`
+				Order *struct {
+					OrderID string `json:"order_id"`
+				} `json:"order"`
+				CancelledOrder *struct {
+					OrderID string `json:"order_id"`
+				} `json:"cancelled_order"`
 			} `json:"result"`
 			Error *struct {
 				Message string `json:"message"`
@@ -351,8 +356,8 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 		if result.Error != nil {
 			return "", fmt.Errorf("replace error: %s", result.Error.Message)
 		}
-		if result.Result != nil {
-			return result.Result.OrderID, nil
+		if result.Result != nil && result.Result.Order != nil {
+			return result.Result.Order.OrderID, nil
 		}
 		return "", fmt.Errorf("no order ID in response")
 	case <-time.After(5 * time.Second):
