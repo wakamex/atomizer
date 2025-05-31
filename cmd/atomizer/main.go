@@ -151,6 +151,8 @@ func showCommandHelp(command string) {
 		fmt.Println("  --underlying ASSET      Underlying asset (default: ETH)")
 		fmt.Println("  --size SIZE             Quote size (default: 0.1)")
 		fmt.Println("  --improvement AMOUNT    Price improvement (default: 0.1)")
+		fmt.Println("  --improvement-reference-size SIZE")
+		fmt.Println("                          Min size for best bid/ask selection (default: 0)")
 		fmt.Println("  --max-position SIZE     Max position per instrument (default: 1.0)")
 		fmt.Println("  --max-exposure SIZE     Max total exposure (default: 10.0)")
 		fmt.Println("  --min-spread BPS        Min spread in basis points (default: 1000)")

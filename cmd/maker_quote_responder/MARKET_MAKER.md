@@ -45,8 +45,8 @@ MarketMaker
 ### Market Making Parameters
 
 - **`-spread int`** (default: 10): Target spread in basis points (100 = 1%)
-  - **Note**: Currently not implemented - quotes are hardcoded to improve by $0.10
-  - Future versions will use this to calculate: `spread_amount = mid_price * spread_bps / 10000`
+  - Used when reference size filtering falls back to mid price
+  - Calculates: `spread_amount = mid_price * spread_bps / 10000`
 
 - **`-size float`** (default: 0.1): Quote size in contracts
   - Number of contracts to quote on each side
@@ -59,6 +59,17 @@ MarketMaker
 - **`-min-spread int`** (default: 1000): Minimum spread in basis points (10%)
   - Enforces minimum distance between bid and ask
   - Prevents quotes from being too tight
+
+- **`-improvement float`** (default: 0.1): Amount to improve quotes by
+  - How much better than the reference price to quote
+  - Bid: reference bid + improvement
+  - Ask: reference ask - improvement
+
+- **`-improvement-reference-size float`** (default: 0): Minimum size for best bid/ask selection
+  - Only improve against orders with at least this size
+  - 0 = use any size (default behavior)
+  - When set, fetches full order book to find qualifying levels
+  - Falls back to mid price ± spread if no qualifying orders found
 
 ### Risk Management
 
@@ -95,23 +106,47 @@ For Derive, the following environment variables are required:
 
 ## Pricing Strategy
 
-The market maker currently uses a fixed improvement strategy:
-- **Bid Price**: Current best bid + $0.10
-- **Ask Price**: Current best ask - $0.10
+The market maker uses a configurable improvement strategy with optional size filtering:
 
-This creates a tighter market inside the current best bid/ask spread.
+### Basic Improvement Strategy
+- **Bid Price**: Reference bid + improvement amount
+- **Ask Price**: Reference ask - improvement amount
+
+### Reference Price Selection
+1. **Without size filter** (`-improvement-reference-size 0`):
+   - Uses current best bid/ask as reference prices
+   
+2. **With size filter** (`-improvement-reference-size > 0`):
+   - Fetches full order book
+   - Finds first bid/ask level with size ≥ reference size
+   - If no qualifying levels found, falls back to mid price ± spread
 
 ### Example Pricing
 
+**Example 1: Basic improvement (no size filter)**
 If the current market is:
-- Best Bid: $100.00
-- Best Ask: $105.00
-- Spread: $5.00 (5%)
+- Best Bid: $100.00 (size: 0.5)
+- Best Ask: $105.00 (size: 0.3)
+- Improvement: $0.10
 
 The market maker will quote:
-- New Bid: $100.10 (improves bid by $0.10)
-- New Ask: $104.90 (improves ask by $0.10)
-- New Spread: $4.80 (4.75%)
+- New Bid: $100.10
+- New Ask: $104.90
+
+**Example 2: With size filter**
+If `-improvement-reference-size 1.0` and the order book is:
+```
+Bids:                    Asks:
+$100.00 (size: 0.5)     $105.00 (size: 0.3)
+$99.50  (size: 1.2) ←   $105.50 (size: 1.5) ←
+$99.00  (size: 2.0)     $106.00 (size: 2.0)
+```
+
+The market maker will:
+- Skip the best bid/ask (sizes < 1.0)
+- Use $99.50 as reference bid (first bid ≥ 1.0)
+- Use $105.50 as reference ask (first ask ≥ 1.0)
+- Quote: Bid $99.60, Ask $105.40
 
 ### Minimum Spread Protection
 
@@ -157,6 +192,30 @@ Trade with position and exposure limits:
   -size 0.5
 ```
 
+### Custom Improvement Strategy
+
+Improve by $0.50 only against orders with size ≥ 5.0:
+
+```bash
+./maker_quote_responder market-maker \
+  -expiry 20250606 \
+  -strikes 3000 \
+  -improvement 0.5 \
+  -improvement-reference-size 5.0
+```
+
+### Avoid Small Orders
+
+Only quote against substantial liquidity:
+
+```bash
+./maker_quote_responder market-maker \
+  -expiry 20250606 \
+  -all-strikes \
+  -improvement-reference-size 10.0 \
+  -size 2.0
+```
+
 ### Testnet Trading
 
 Test on Derive testnet:
@@ -199,6 +258,9 @@ ALL_STRIKES=true SPREAD_BPS=20 ./run_market_maker.sh
 
 # Conservative settings
 MAX_POSITION=5.0 MAX_EXPOSURE=50.0 SIZE=0.5 ./run_market_maker.sh
+
+# Custom improvement strategy
+IMPROVEMENT=0.5 IMPROVEMENT_REFERENCE_SIZE=10.0 ./run_market_maker.sh
 
 # Dry run to see configuration
 DRY_RUN=true ./run_market_maker.sh
