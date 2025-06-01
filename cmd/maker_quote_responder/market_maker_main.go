@@ -38,6 +38,8 @@ func RunMarketMaker(args []string) {
 		walletAddress = fs.String("wallet", "", "Wallet address (Derive only)")
 		dryRun        = fs.Bool("dry-run", false, "Print configuration without starting")
 		debug         = fs.Bool("debug", false, "Enable debug logging")
+		bidOnly       = fs.Bool("bid-only", false, "Only place bid orders (buy side)")
+		askOnly       = fs.Bool("ask-only", false, "Only place ask orders (sell side)")
 	)
 	
 	// Parse the arguments
@@ -74,6 +76,11 @@ func RunMarketMaker(args []string) {
 	// Build instrument list
 	instruments := buildMarketMakerInstrumentList(*underlying, *expiry, *strikes, *allStrikes)
 	
+	// Validate one-sided flags
+	if *bidOnly && *askOnly {
+		log.Fatal("Cannot specify both --bid-only and --ask-only")
+	}
+	
 	// Create configuration
 	config := &MarketMakerConfig{
 		Exchange:         *exchange,
@@ -90,11 +97,19 @@ func RunMarketMaker(args []string) {
 		TargetFillRate:   decimal.NewFromFloat(0.1), // 10% default
 		Improvement:      decimal.NewFromFloat(*improvement),
 		ImprovementReferenceSize: decimal.NewFromFloat(*improvementReferenceSize),
+		BidOnly:          *bidOnly,
+		AskOnly:          *askOnly,
 	}
 	
 	// Print concise configuration
-	log.Printf("Market Maker: %s %s-%s (%d strikes), size=%s, improvement=%s", 
-		config.Exchange, *underlying, *expiry, len(config.Instruments), config.QuoteSize, config.Improvement)
+	mode := "two-sided"
+	if config.BidOnly {
+		mode = "bid-only"
+	} else if config.AskOnly {
+		mode = "ask-only"
+	}
+	log.Printf("Market Maker: %s %s-%s (%d strikes), size=%s, improvement=%s, mode=%s", 
+		config.Exchange, *underlying, *expiry, len(config.Instruments), config.QuoteSize, config.Improvement, mode)
 	if *debug {
 		log.Printf("  Instruments: %v", config.Instruments)
 		log.Printf("  Spread: %d bps, Refresh: %s", config.SpreadBps, config.RefreshInterval)

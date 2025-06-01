@@ -40,6 +40,9 @@ type MarketMaker struct {
 	
 	// Per-instrument update locks to prevent concurrent updates
 	updateLocks map[string]*sync.Mutex
+	
+	// Track orders that consistently fail to cancel (likely don't exist)
+	failedCancelAttempts map[string]int
 }
 
 // NewMarketMaker creates a new market maker instance
@@ -64,12 +67,19 @@ func NewMarketMaker(config *MarketMakerConfig, exchange MarketMakerExchange) *Ma
 		cancel:             cancel,
 		orderbookErrorLogged: make(map[string]bool),
 		updateLocks:        updateLocks,
+		failedCancelAttempts: make(map[string]int),
 	}
 }
 
 // Start begins market making
 func (mm *MarketMaker) Start() error {
-	log.Printf("Starting market maker: %d instruments, 1 buy + 1 sell per instrument", len(mm.config.Instruments))
+	mode := "two-sided (1 buy + 1 sell)"
+	if mm.config.BidOnly {
+		mode = "bid-only"
+	} else if mm.config.AskOnly {
+		mode = "ask-only"
+	}
+	log.Printf("Starting market maker: %d instruments, %s per instrument", len(mm.config.Instruments), mode)
 	
 	// Clear any stale state
 	mm.mu.Lock()
@@ -289,13 +299,33 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 			}
 		}
 		
+		// Cancel unwanted orders in one-sided mode
+		if mm.config.AskOnly && bidOrder != nil {
+			log.Printf("Cancelling bid order %s (ask-only mode)", bidOrder.OrderID)
+			mm.cancelOrder(bidOrder.OrderID)
+			bidOrder = nil
+		}
+		if mm.config.BidOnly && askOrder != nil {
+			log.Printf("Cancelling ask order %s (bid-only mode)", askOrder.OrderID)
+			mm.cancelOrder(askOrder.OrderID)
+			askOrder = nil
+		}
+		
 		// Replace existing orders if they exist
 		var replacedBid, replacedAsk bool
+		
+		// Handle one-sided quoting
+		if mm.config.AskOnly {
+			replacedBid = true // Skip bid side
+		}
+		if mm.config.BidOnly {
+			replacedAsk = true // Skip ask side
+		}
 		
 		// TEMPORARY: Disable ReplaceOrder since it seems broken on Derive
 		const useReplaceOrder = false
 		
-		if bidOrder != nil && bidOrder.OrderID != "" {
+		if bidOrder != nil && bidOrder.OrderID != "" && !mm.config.AskOnly {
 			// Skip if order is already at target price and was created recently
 			if bidOrder.Price.Equal(bidPrice) && time.Since(bidOrder.CreatedAt) < 5*time.Second {
 				debugLog("Skipping bid update - order %s already at target price", bidOrder.OrderID)
@@ -331,7 +361,7 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 			}
 		}
 		
-		if askOrder != nil && askOrder.OrderID != "" {
+		if askOrder != nil && askOrder.OrderID != "" && !mm.config.BidOnly {
 			// Skip if order is already at target price and was created recently
 			if askOrder.Price.Equal(askPrice) && time.Since(askOrder.CreatedAt) < 5*time.Second {
 				debugLog("Skipping ask update - order %s already at target price", askOrder.OrderID)
@@ -411,13 +441,13 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 			}
 		}
 		
-		// Place new orders for any that weren't replaced
-		if !replacedBid {
+		// Place new orders for any that weren't replaced (respecting one-sided flags)
+		if !replacedBid && !mm.config.AskOnly {
 			if err := mm.placeSingleQuote(instrument, "buy", bidPrice); err != nil {
 				log.Printf("Failed to place bid order: %v", err)
 			}
 		}
-		if !replacedAsk {
+		if !replacedAsk && !mm.config.BidOnly {
 			if err := mm.placeSingleQuote(instrument, "sell", askPrice); err != nil {
 				log.Printf("Failed to place ask order: %v", err)
 			}
@@ -494,30 +524,53 @@ func (mm *MarketMaker) calculateQuotes(ticker *TickerUpdate, orderBook *MarketMa
 	return bidPrice, askPrice
 }
 
-// placeQuotes places bid and ask orders
+// placeQuotes places bid and ask orders (respecting one-sided flags)
 func (mm *MarketMaker) placeQuotes(instrument string, bidPrice, askPrice decimal.Decimal) error {
-	// Place bid order
-	bidOrderID, err := mm.exchange.PlaceLimitOrder(instrument, "buy", bidPrice, mm.config.QuoteSize)
-	if err != nil {
-		return fmt.Errorf("failed to place bid order: %w", err)
+	var bidOrderID, askOrderID string
+	var err error
+	ordersPlaced := 0
+	
+	// Place bid order if not ask-only
+	if !mm.config.AskOnly {
+		bidOrderID, err = mm.exchange.PlaceLimitOrder(instrument, "buy", bidPrice, mm.config.QuoteSize)
+		if err != nil {
+			return fmt.Errorf("failed to place bid order: %w", err)
+		}
+		ordersPlaced++
 	}
 	
-	// Place ask order
-	askOrderID, err := mm.exchange.PlaceLimitOrder(instrument, "sell", askPrice, mm.config.QuoteSize)
-	if err != nil {
-		// Cancel the bid order since we couldn't place the ask
-		mm.exchange.CancelOrder(bidOrderID)
-		return fmt.Errorf("failed to place ask order: %w", err)
+	// Place ask order if not bid-only
+	if !mm.config.BidOnly {
+		askOrderID, err = mm.exchange.PlaceLimitOrder(instrument, "sell", askPrice, mm.config.QuoteSize)
+		if err != nil {
+			// Cancel the bid order if we placed one but couldn't place the ask
+			if bidOrderID != "" {
+				mm.exchange.CancelOrder(bidOrderID)
+			}
+			return fmt.Errorf("failed to place ask order: %w", err)
+		}
+		ordersPlaced++
 	}
 	
 	// Track orders
 	mm.mu.Lock()
-	mm.trackOrder(bidOrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
-	mm.trackOrder(askOrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
-	mm.stats.OrdersPlaced += 2
+	if bidOrderID != "" {
+		mm.trackOrder(bidOrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
+	}
+	if askOrderID != "" {
+		mm.trackOrder(askOrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
+	}
+	mm.stats.OrdersPlaced += int64(ordersPlaced)
 	mm.mu.Unlock()
 	
-	log.Printf("Placed quotes for %s: Bid %s, Ask %s", instrument, bidPrice.String(), askPrice.String())
+	// Log what was actually placed
+	if mm.config.BidOnly {
+		log.Printf("Placed bid order for %s @ %s", instrument, bidPrice.String())
+	} else if mm.config.AskOnly {
+		log.Printf("Placed ask order for %s @ %s", instrument, askPrice.String())
+	} else {
+		log.Printf("Placed quotes for %s: Bid %s, Ask %s", instrument, bidPrice.String(), askPrice.String())
+	}
 	
 	return nil
 }
@@ -574,6 +627,27 @@ func (mm *MarketMaker) updateOrderTracking(oldOrderID, newOrderID, instrument, s
 
 // cancelOrder cancels a single order and returns whether it was successfully cancelled
 func (mm *MarketMaker) cancelOrder(orderID string) bool {
+	// Check if we've already tried to cancel this order many times
+	mm.mu.Lock()
+	if attempts, exists := mm.failedCancelAttempts[orderID]; exists && attempts >= 3 {
+		// This order has consistently failed to cancel, treat as already gone
+		log.Printf("Order %s has failed to cancel %d times, treating as non-existent", orderID, attempts)
+		// Clean up tracking
+		if order, exists := mm.activeOrders[orderID]; exists {
+			delete(mm.activeOrders, orderID)
+			if instrumentOrders, exists := mm.ordersByInstrument[order.Instrument]; exists {
+				delete(instrumentOrders, order.Side)
+				if len(instrumentOrders) == 0 {
+					delete(mm.ordersByInstrument, order.Instrument)
+				}
+			}
+		}
+		delete(mm.failedCancelAttempts, orderID)
+		mm.mu.Unlock()
+		return true
+	}
+	mm.mu.Unlock()
+	
 	// Try to cancel with retries for internal errors
 	var lastErr error
 	for retries := 0; retries < 3; retries++ {
@@ -595,6 +669,7 @@ func (mm *MarketMaker) cancelOrder(orderID string) bool {
 				}
 				mm.stats.OrdersCancelled++
 			}
+			delete(mm.failedCancelAttempts, orderID)
 			mm.mu.Unlock()
 			return true
 		}
@@ -614,13 +689,16 @@ func (mm *MarketMaker) cancelOrder(orderID string) bool {
 					}
 				}
 			}
+			delete(mm.failedCancelAttempts, orderID)
 			mm.mu.Unlock()
 			return true
 		}
 		
-		// For "Internal error", retry
+		// For "Internal error", retry but only log on first retry
 		if strings.Contains(err.Error(), "Internal error") {
-			log.Printf("Internal error cancelling order %s, retry %d/3", orderID, retries+1)
+			if retries == 0 {
+				log.Printf("Internal error cancelling order %s, will retry", orderID)
+			}
 			continue
 		}
 		
@@ -628,7 +706,31 @@ func (mm *MarketMaker) cancelOrder(orderID string) bool {
 		break
 	}
 	
-	log.Printf("Failed to cancel order %s after retries: %v", orderID, lastErr)
+	// Track failed attempts
+	mm.mu.Lock()
+	mm.failedCancelAttempts[orderID]++
+	attempts := mm.failedCancelAttempts[orderID]
+	mm.mu.Unlock()
+	
+	// If this is the 3rd+ failed attempt, treat as non-existent
+	if attempts >= 3 {
+		log.Printf("Order %s failed to cancel %d times (likely doesn't exist), treating as cancelled", orderID, attempts)
+		mm.mu.Lock()
+		if order, exists := mm.activeOrders[orderID]; exists {
+			delete(mm.activeOrders, orderID)
+			if instrumentOrders, exists := mm.ordersByInstrument[order.Instrument]; exists {
+				delete(instrumentOrders, order.Side)
+				if len(instrumentOrders) == 0 {
+					delete(mm.ordersByInstrument, order.Instrument)
+				}
+			}
+		}
+		delete(mm.failedCancelAttempts, orderID)
+		mm.mu.Unlock()
+		return true
+	}
+	
+	log.Printf("Failed to cancel order %s (attempt %d): %v", orderID, attempts, lastErr)
 	return false
 }
 
