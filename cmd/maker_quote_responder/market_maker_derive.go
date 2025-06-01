@@ -208,13 +208,53 @@ func (d *DeriveMarketMakerExchange) PlaceLimitOrder(instrument string, side stri
 	// Create order directly using our existing WebSocket connection
 	// This avoids creating a new connection for each order
 	
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: Starting order placement for %s %s %.6f @ %.6f", 
+			instrument, side, amount.InexactFloat64(), price.InexactFloat64())
+	}
+	
 	// Get auth from our existing client
 	auth := d.wsClient.GetAuth()
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: Auth address: %s", auth.GetAddress())
+		log.Printf("DEBUG PlaceLimitOrder: Wallet address: %s", d.wsClient.GetWallet())
+		log.Printf("DEBUG PlaceLimitOrder: SubaccountID: %d", d.subaccountID)
+	}
 	
 	// Get instrument details
 	instrumentDetails, err := d.getInstrumentDetails(instrument)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch instrument: %w", err)
+	}
+	
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: Instrument details fetched:")
+		log.Printf("  BaseAssetAddress: %s", instrumentDetails.BaseAssetAddress)
+		log.Printf("  BaseAssetSubID: %s", instrumentDetails.BaseAssetSubID)
+	}
+	
+	// Calculate values for action - use exact decimal conversion to avoid precision issues
+	limitPriceBigInt := func() *big.Int { 
+		// Convert decimal to wei (multiply by 1e18) using exact arithmetic
+		wei := price.Mul(decimal.New(1, 18)) // 1e18
+		v := new(big.Int)
+		v.SetString(wei.String(), 10)
+		return v
+	}()
+	amountBigInt := func() *big.Int { 
+		// Convert decimal to wei (multiply by 1e18) using exact arithmetic
+		wei := amount.Mul(decimal.New(1, 18)) // 1e18
+		v := new(big.Int)
+		v.SetString(wei.String(), 10)
+		return v
+	}()
+	maxFeeBigInt := new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18))
+	
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: Calculated values:")
+		log.Printf("  LimitPrice (wei): %s", limitPriceBigInt.String())
+		log.Printf("  Amount (wei): %s", amountBigInt.String())
+		log.Printf("  MaxFee (wei): %s", maxFeeBigInt.String())
 	}
 	
 	// Create signed action
@@ -227,11 +267,28 @@ func (d *DeriveMarketMakerExchange) PlaceLimitOrder(instrument string, side stri
 		ModuleAddress:      "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b",
 		AssetAddress:       instrumentDetails.BaseAssetAddress,
 		SubID:              instrumentDetails.BaseAssetSubID,
-		LimitPrice:         func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(price.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
-		Amount:             func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(amount.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
-		MaxFee:             new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18)), // 100 USDC max fee
+		LimitPrice:         limitPriceBigInt,
+		Amount:             amountBigInt,
+		MaxFee:             maxFeeBigInt,
 		RecipientID:        d.subaccountID,
 		IsBid:              side == "buy",
+	}
+	
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: DeriveAction struct before signing:")
+		log.Printf("  SubaccountID: %d", action.SubaccountID)
+		log.Printf("  Owner: %s", action.Owner)
+		log.Printf("  Signer: %s", action.Signer)
+		log.Printf("  SignatureExpirySec: %d", action.SignatureExpirySec)
+		log.Printf("  Nonce: %d", action.Nonce)
+		log.Printf("  ModuleAddress: %s", action.ModuleAddress)
+		log.Printf("  AssetAddress: %s", action.AssetAddress)
+		log.Printf("  SubID: %s", action.SubID)
+		log.Printf("  LimitPrice: %s", action.LimitPrice.String())
+		log.Printf("  Amount: %s", action.Amount.String())
+		log.Printf("  MaxFee: %s", action.MaxFee.String())
+		log.Printf("  RecipientID: %d", action.RecipientID)
+		log.Printf("  IsBid: %v", action.IsBid)
 	}
 	
 	// Sign the action
@@ -239,46 +296,129 @@ func (d *DeriveMarketMakerExchange) PlaceLimitOrder(instrument string, side stri
 		return "", fmt.Errorf("failed to sign action: %w", err)
 	}
 	
-	// Prepare order request
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: Action signed successfully")
+		log.Printf("  Signature: %s", action.Signature)
+	}
+	
+	// Prepare order request - ensure correct types match the working test
 	orderReq := map[string]interface{}{
 		"instrument_name":      instrument,
 		"direction":           side,
 		"order_type":         "limit",
 		"time_in_force":      "gtc",
 		"mmp":                true, // Market maker protection
-		"subaccount_id":      d.subaccountID,
-		"nonce":              action.Nonce,
+		"subaccount_id":      d.subaccountID,      // int64
+		"nonce":              action.Nonce,         // uint64
+		"owner":              action.Owner,
 		"signer":             action.Signer,
-		"signature_expiry_sec": action.SignatureExpirySec,
+		"signature_expiry_sec": action.SignatureExpirySec, // int64
 		"signature":          action.Signature,
 		"limit_price":        fmt.Sprintf("%.6f", price.InexactFloat64()),
 		"amount":             fmt.Sprintf("%.6f", amount.InexactFloat64()),
-		"max_fee":            "100",
+		"max_fee":            "100", // string of integer, not decimal
+	}
+	
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: Order request payload:")
+		orderReqJSON, _ := json.MarshalIndent(orderReq, "  ", "  ")
+		log.Printf("%s", string(orderReqJSON))
+	}
+	
+	// Debug the order first to see what the server expects
+	if debugMode {
+		debugResp, err := d.wsClient.DebugOrder(orderReq)
+		if err != nil {
+			if debugMode {
+				log.Printf("DEBUG PlaceLimitOrder: Failed to debug order: %v", err)
+			}
+		} else {
+			// Log the debug response
+			if result, ok := debugResp["result"].(map[string]interface{}); ok {
+				if debugMode {
+					log.Printf("DEBUG PlaceLimitOrder: Order debug info from server:")
+					log.Printf("  action_hash: %v", result["action_hash"])
+					log.Printf("  typed_data_hash: %v", result["typed_data_hash"])
+					log.Printf("  encoded_data_hashed: %v", result["encoded_data_hashed"])
+					if rawData, ok := result["raw_data"].(map[string]interface{}); ok {
+						rawJSON, _ := json.MarshalIndent(rawData, "    ", "  ")
+						log.Printf("  raw_data: %s", string(rawJSON))
+					}
+				}
+			}
+		}
 	}
 	
 	// Submit order via our existing WebSocket client
 	orderResp, err := d.wsClient.SubmitOrder(orderReq)
 	if err != nil {
+		if debugMode {
+			log.Printf("DEBUG PlaceLimitOrder: Failed to submit order: %v", err)
+		}
 		return "", fmt.Errorf("failed to submit order: %w", err)
 	}
 	
+	// Debug: Log the full response
+	if debugMode {
+		respJSON, _ := json.MarshalIndent(orderResp, "  ", "  ")
+		log.Printf("DEBUG PlaceLimitOrder: Full order response:\n%s", string(respJSON))
+	}
+	
 	if orderResp.Error != nil {
+		if debugMode {
+			log.Printf("DEBUG PlaceLimitOrder: Order error response: %s", orderResp.Error.Message)
+		}
 		return "", fmt.Errorf("order error: %s", orderResp.Error.Message)
 	}
 	
+	if orderResp.Result.OrderID == "" {
+		if debugMode {
+			log.Printf("DEBUG PlaceLimitOrder: Order response has empty order ID")
+		}
+		return "", fmt.Errorf("order response has empty order ID")
+	}
+	
+	if debugMode {
+		log.Printf("DEBUG PlaceLimitOrder: Order placed successfully with ID: %s", orderResp.Result.OrderID)
+	}
 	return orderResp.Result.OrderID, nil
 }
 
 // ReplaceOrder replaces an existing order with new parameters
 func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument string, side string, price, amount decimal.Decimal) (string, error) {
+	if debugMode {
+		log.Printf("DEBUG ReplaceOrder: Starting order replacement for order %s -> %s %s %.6f @ %.6f", 
+			orderID, instrument, side, amount.InexactFloat64(), price.InexactFloat64())
+	}
+	
 	// Get auth from our existing client
 	auth := d.wsClient.GetAuth()
+	if debugMode {
+		log.Printf("DEBUG ReplaceOrder: Auth address: %s", auth.GetAddress())
+	}
 	
 	// Get instrument details
 	instrumentDetails, err := d.getInstrumentDetails(instrument)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch instrument: %w", err)
 	}
+	
+	if debugMode {
+		log.Printf("DEBUG ReplaceOrder: Instrument details:")
+		log.Printf("  BaseAssetAddress: %s", instrumentDetails.BaseAssetAddress)
+		log.Printf("  BaseAssetSubID: %s", instrumentDetails.BaseAssetSubID)
+	}
+	
+	// Calculate values for action
+	limitPriceBigInt := func() *big.Int { 
+		v, _ := new(big.Float).Mul(big.NewFloat(price.InexactFloat64()), big.NewFloat(1e18)).Int(nil)
+		return v
+	}()
+	amountBigInt := func() *big.Int { 
+		v, _ := new(big.Float).Mul(big.NewFloat(amount.InexactFloat64()), big.NewFloat(1e18)).Int(nil)
+		return v
+	}()
+	maxFeeBigInt := new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18))
 	
 	// Create signed action for the new order
 	action := &DeriveAction{
@@ -290,11 +430,28 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 		ModuleAddress:      "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b",
 		AssetAddress:       instrumentDetails.BaseAssetAddress,
 		SubID:              instrumentDetails.BaseAssetSubID,
-		LimitPrice:         func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(price.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
-		Amount:             func() *big.Int { v, _ := new(big.Float).Mul(big.NewFloat(amount.InexactFloat64()), big.NewFloat(1e18)).Int(nil); return v }(),
-		MaxFee:             new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18)), // 100 USDC max fee
+		LimitPrice:         limitPriceBigInt,
+		Amount:             amountBigInt,
+		MaxFee:             maxFeeBigInt,
 		RecipientID:        d.subaccountID,
 		IsBid:              side == "buy",
+	}
+	
+	if debugMode {
+		log.Printf("DEBUG ReplaceOrder: DeriveAction struct before signing:")
+		log.Printf("  SubaccountID: %d", action.SubaccountID)
+		log.Printf("  Owner: %s", action.Owner)
+		log.Printf("  Signer: %s", action.Signer)
+		log.Printf("  SignatureExpirySec: %d", action.SignatureExpirySec)
+		log.Printf("  Nonce: %d", action.Nonce)
+		log.Printf("  ModuleAddress: %s", action.ModuleAddress)
+		log.Printf("  AssetAddress: %s", action.AssetAddress)
+		log.Printf("  SubID: %s", action.SubID)
+		log.Printf("  LimitPrice: %s", action.LimitPrice.String())
+		log.Printf("  Amount: %s", action.Amount.String())
+		log.Printf("  MaxFee: %s", action.MaxFee.String())
+		log.Printf("  RecipientID: %d", action.RecipientID)
+		log.Printf("  IsBid: %v", action.IsBid)
 	}
 	
 	// Sign the action
@@ -302,25 +459,30 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 		return "", fmt.Errorf("failed to sign action: %w", err)
 	}
 	
+	if debugMode {
+		log.Printf("DEBUG ReplaceOrder: Action signed successfully, signature: %s", action.Signature)
+	}
+	
 	// Prepare replace request
 	replaceReq := map[string]interface{}{
 		// Cancel parameters - use the correct field name
 		"order_id_to_cancel": orderID,
 		
-		// New order parameters
+		// New order parameters (all required fields)
 		"instrument_name":      instrument,
 		"direction":           side,
 		"order_type":         "limit",
 		"time_in_force":      "gtc",
-		"mmp":                true, // Market maker protection
+		"amount":             fmt.Sprintf("%.6f", amount.InexactFloat64()),
+		"limit_price":        fmt.Sprintf("%.6f", price.InexactFloat64()),
+		"max_fee":            "100",
 		"subaccount_id":      d.subaccountID,
 		"nonce":              action.Nonce,
-		"signer":             action.Signer,
 		"signature_expiry_sec": action.SignatureExpirySec,
+		"owner":              action.Owner,
+		"signer":             action.Signer,
 		"signature":          action.Signature,
-		"limit_price":        fmt.Sprintf("%.6f", price.InexactFloat64()),
-		"amount":             fmt.Sprintf("%.6f", amount.InexactFloat64()),
-		"max_fee":            "100",
+		"mmp":                true, // Market maker protection
 	}
 	
 	// Send replace request
@@ -339,7 +501,17 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 	case resp := <-respChan:
 		var result struct {
 			Result *struct {
-				OrderID string `json:"order_id"`
+				Order *struct {
+					OrderID string `json:"order_id"`
+				} `json:"order"`
+				CancelledOrder *struct {
+					OrderID string `json:"order_id"`
+				} `json:"cancelled_order"`
+				CreateOrderError *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+					Data    string `json:"data"`
+				} `json:"create_order_error"`
 			} `json:"result"`
 			Error *struct {
 				Message string `json:"message"`
@@ -352,7 +524,34 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 			return "", fmt.Errorf("replace error: %s", result.Error.Message)
 		}
 		if result.Result != nil {
-			return result.Result.OrderID, nil
+			// Check for partial failure: cancelled but not created
+			if result.Result.CancelledOrder != nil && result.Result.Order == nil {
+				// Log the partial failure
+				log.Printf("WARNING: Replace order partially failed - cancelled order %s but failed to create new order", 
+					result.Result.CancelledOrder.OrderID)
+				
+				if result.Result.CreateOrderError != nil {
+					log.Printf("Create order error: Code=%d, Message=%s, Data=%s", 
+						result.Result.CreateOrderError.Code, 
+						result.Result.CreateOrderError.Message,
+						result.Result.CreateOrderError.Data)
+				}
+				
+				// Attempt recovery by placing a new order
+				log.Printf("Attempting to recover by placing a new order: %s %s %.6f @ %.6f", 
+					instrument, side, amount.InexactFloat64(), price.InexactFloat64())
+				
+				return d.PlaceLimitOrder(instrument, side, price, amount)
+			}
+			
+			// Success case: both cancelled and created
+			if result.Result.Order != nil {
+				if result.Result.CancelledOrder != nil {
+					log.Printf("Successfully replaced order %s with new order %s", 
+						result.Result.CancelledOrder.OrderID, result.Result.Order.OrderID)
+				}
+				return result.Result.Order.OrderID, nil
+			}
 		}
 		return "", fmt.Errorf("no order ID in response")
 	case <-time.After(5 * time.Second):
@@ -448,97 +647,27 @@ func (d *DeriveMarketMakerExchange) GetPositions() ([]ExchangePosition, error) {
 	return positions, nil
 }
 
-// GetOrderBook fetches the order book for an instrument
+// GetOrderBook returns the cached orderbook from WebSocket subscription
 func (d *DeriveMarketMakerExchange) GetOrderBook(instrument string) (*MarketMakerOrderBook, error) {
-	// Fetch instrument details to get the correct instrument ID
-	_, err := d.getInstrumentDetails(instrument)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get instrument details: %w", err)
+	// Get cached orderbook from WebSocket client
+	orderbook := d.wsClient.GetOrderBook(instrument)
+	if orderbook == nil {
+		return nil, fmt.Errorf("no orderbook data available for %s", instrument)
 	}
 	
-	// Make HTTP request to get orderbook
-	// Using the REST API endpoint since WebSocket might not have orderbook subscription
-	url := "https://api-testnet.lyra.finance/public/get_orderbook"
-	
-	reqBody := map[string]interface{}{
-		"instrument_name": instrument,
-		"depth": 20, // Get top 20 levels
+	// Convert to MarketMakerOrderBook format
+	mmOrderBook := &MarketMakerOrderBook{
+		Bids:      orderbook.Bids,
+		Asks:      orderbook.Asks,
+		Timestamp: orderbook.Timestamp,
 	}
 	
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-	
-	req, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-	
-	req.Header.Set("Content-Type", "application/json")
-	
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch orderbook: %w", err)
-	}
-	defer resp.Body.Close()
-	
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-	
-	var result struct {
-		Result struct {
-			Bids [][]json.Number `json:"bids"`
-			Asks [][]json.Number `json:"asks"`
-		} `json:"result"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-	
-	if result.Error != nil {
-		return nil, fmt.Errorf("API error: %s", result.Error.Message)
-	}
-	
-	// Convert to our MarketMakerOrderBook format
-	orderBook := &MarketMakerOrderBook{
-		Bids: make([]OrderBookLevel, 0, len(result.Result.Bids)),
-		Asks: make([]OrderBookLevel, 0, len(result.Result.Asks)),
-		Timestamp: time.Now(),
-	}
-	
-	// Parse bids
-	for _, bid := range result.Result.Bids {
-		if len(bid) >= 2 {
-			price, _ := decimal.NewFromString(bid[0].String())
-			size, _ := decimal.NewFromString(bid[1].String())
-			orderBook.Bids = append(orderBook.Bids, OrderBookLevel{
-				Price: price,
-				Size:  size,
-			})
-		}
-	}
-	
-	// Parse asks
-	for _, ask := range result.Result.Asks {
-		if len(ask) >= 2 {
-			price, _ := decimal.NewFromString(ask[0].String())
-			size, _ := decimal.NewFromString(ask[1].String())
-			orderBook.Asks = append(orderBook.Asks, OrderBookLevel{
-				Price: price,
-				Size:  size,
-			})
-		}
-	}
-	
-	return orderBook, nil
+	return mmOrderBook, nil
+}
+
+// SubscribeOrderBook subscribes to orderbook updates for an instrument
+func (d *DeriveMarketMakerExchange) SubscribeOrderBook(instrument string) error {
+	return d.wsClient.SubscribeOrderBook(instrument, 20) // Subscribe with depth 20
 }
 
 // Helper functions to extract values from map

@@ -49,5 +49,3 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
-
-replace github.com/wakamex/ryskV12-cli => ../sdk // Points to your local SDK copy

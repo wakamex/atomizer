@@ -37,10 +37,17 @@ func RunMarketMaker(args []string) {
 		privateKey    = fs.String("private-key", "", "Private key (overrides env var)")
 		walletAddress = fs.String("wallet", "", "Wallet address (Derive only)")
 		dryRun        = fs.Bool("dry-run", false, "Print configuration without starting")
+		debug         = fs.Bool("debug", false, "Enable debug logging")
 	)
 	
 	// Parse the arguments
 	fs.Parse(args)
+	
+	// Enable debug mode if requested
+	if *debug {
+		SetDebugMode(true)
+		log.Println("Debug mode enabled")
+	}
 	
 	// Validate required parameters
 	if *expiry == "" {
@@ -85,26 +92,17 @@ func RunMarketMaker(args []string) {
 		ImprovementReferenceSize: decimal.NewFromFloat(*improvementReferenceSize),
 	}
 	
-	// Print configuration
-	log.Println("Market Maker Configuration:")
-	log.Printf("  Exchange: %s (test mode: %v)", config.Exchange, config.ExchangeTestMode)
-	log.Printf("  Underlying: %s", *underlying)
-	log.Printf("  Expiry: %s", *expiry)
-	log.Printf("  Instruments: %d", len(config.Instruments))
-	if len(config.Instruments) <= 10 {
-		for _, inst := range config.Instruments {
-			log.Printf("    - %s", inst)
+	// Print concise configuration
+	log.Printf("Market Maker: %s %s-%s (%d strikes), size=%s, improvement=%s", 
+		config.Exchange, *underlying, *expiry, len(config.Instruments), config.QuoteSize, config.Improvement)
+	if *debug {
+		log.Printf("  Instruments: %v", config.Instruments)
+		log.Printf("  Spread: %d bps, Refresh: %s", config.SpreadBps, config.RefreshInterval)
+		log.Printf("  Limits: Position=%s, Exposure=%s", config.MaxPositionSize, config.MaxTotalExposure)
+		if config.ImprovementReferenceSize.GreaterThan(decimal.Zero) {
+			log.Printf("  Reference Size: %s", config.ImprovementReferenceSize)
 		}
-	} else {
-		log.Printf("    - %s ... %s", config.Instruments[0], config.Instruments[len(config.Instruments)-1])
 	}
-	log.Printf("  Spread: %d bps (%.2f%%)", config.SpreadBps, float64(config.SpreadBps)/100)
-	log.Printf("  Quote Size: %s", config.QuoteSize)
-	log.Printf("  Refresh Interval: %s", config.RefreshInterval)
-	log.Printf("  Max Position: %s", config.MaxPositionSize)
-	log.Printf("  Max Exposure: %s", config.MaxTotalExposure)
-	log.Printf("  Improvement: %s", config.Improvement)
-	log.Printf("  Improvement Reference Size: %s", config.ImprovementReferenceSize)
 	
 	if *dryRun {
 		log.Println("Dry run mode - exiting without starting market maker")

@@ -3,11 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 // DeriveWSClient handles WebSocket connection to Derive
@@ -18,6 +19,19 @@ type DeriveWSClient struct {
 	subaccounts  []int
 	mu           sync.Mutex
 	requests     map[string]chan json.RawMessage
+	
+	// Orderbook data
+	orderbooks   map[string]*OrderBookData
+	orderbookMu  sync.RWMutex
+	orderbookSubs map[string]bool
+}
+
+// OrderBookData represents orderbook state
+type OrderBookData struct {
+	Bids      []OrderBookLevel
+	Asks      []OrderBookLevel
+	Timestamp time.Time
+	ChangeID  int64
 }
 
 // NewDeriveWSClient creates a new Derive WebSocket client
@@ -28,14 +42,16 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 	}
 
 	client := &DeriveWSClient{
-		auth:     auth,
-		wallet:   deriveWallet,
-		requests: make(map[string]chan json.RawMessage),
+		auth:         auth,
+		wallet:       deriveWallet,
+		requests:     make(map[string]chan json.RawMessage),
+		orderbooks:   make(map[string]*OrderBookData),
+		orderbookSubs: make(map[string]bool),
 	}
 
 	// Connect to Derive WebSocket
 	wsURL := "wss://api.lyra.finance/ws"
-	log.Printf("[Derive WS] Connecting to %s", wsURL)
+	debugLog("[Derive WS] Connecting to %s", wsURL)
 	
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
@@ -45,16 +61,16 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 	
 	// Set up ping/pong handlers with label
 	conn.SetPingHandler(func(appData string) error {
-		log.Printf("[Derive WS] Ping received, sending Pong")
+		debugLog("[Derive WS] Ping received, sending Pong")
 		err := conn.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(5*time.Second))
 		if err != nil {
-			log.Printf("[Derive WS] Error sending pong: %v", err)
+			debugLog("[Derive WS] Error sending pong: %v", err)
 		}
 		return nil
 	})
 	
 	conn.SetPongHandler(func(appData string) error {
-		log.Printf("[Derive WS] Pong received")
+		debugLog("[Derive WS] Pong received")
 		return nil
 	})
 
@@ -89,7 +105,7 @@ func (c *DeriveWSClient) heartbeat() {
 			
 			// Send ping
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("[Derive WS] Error sending ping: %v", err)
+				debugLog("[Derive WS] Error sending ping: %v", err)
 				c.mu.Unlock()
 				return
 			}
@@ -97,7 +113,7 @@ func (c *DeriveWSClient) heartbeat() {
 			
 		case <-time.After(60 * time.Second):
 			// If we haven't received anything in 60 seconds, consider the connection dead
-			log.Printf("[Derive WS] No activity for 60 seconds, connection may be dead")
+			debugLog("[Derive WS] No activity for 60 seconds, connection may be dead")
 			return
 		}
 	}
@@ -115,10 +131,10 @@ func (c *DeriveWSClient) login() error {
 
 	ownerEOA := c.auth.GetAddress()
 	
-	log.Printf("[Derive WS] Login - EOA: %s", ownerEOA)
-	log.Printf("[Derive WS] Login - Derive Wallet: %s", c.wallet)
-	log.Printf("[Derive WS] Login - Timestamp: %d (%s)", timestamp, timestampStr)
-	log.Printf("[Derive WS] Login - Signature: %s", signature)
+	debugLog("[Derive WS] Login - EOA: %s", ownerEOA)
+	debugLog("[Derive WS] Login - Derive Wallet: %s", c.wallet)
+	debugLog("[Derive WS] Login - Timestamp: %d (%s)", timestamp, timestampStr)
+	debugLog("[Derive WS] Login - Signature: %s", signature)
 
 	// Use JSON-RPC format - server expects it
 	loginReq := map[string]interface{}{
@@ -132,14 +148,14 @@ func (c *DeriveWSClient) login() error {
 		"id": fmt.Sprintf("%d", time.Now().UnixMilli()),
 	}
 
-	log.Printf("[Derive WS] Sending login request: %+v", loginReq)
+	debugLog("[Derive WS] Sending login request: %+v", loginReq)
 
 	// Send login request
 	respChan := c.sendRequest(loginReq)
 	
 	select {
 	case resp := <-respChan:
-		log.Printf("[Derive WS] Login response: %s", string(resp))
+		debugLog("[Derive WS] Login response: %s", string(resp))
 		
 		var result struct {
 			Result []int `json:"result"` // Array of subaccount IDs
@@ -158,7 +174,7 @@ func (c *DeriveWSClient) login() error {
 		// Store subaccount IDs
 		c.subaccounts = result.Result
 		
-		log.Printf("[Derive WS] Login successful. Subaccounts: %v", result.Result)
+		debugLog("[Derive WS] Login successful. Subaccounts: %v", result.Result)
 		return nil
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("login timeout")
@@ -170,17 +186,29 @@ func (c *DeriveWSClient) handleMessages() {
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			log.Printf("[Derive WS] Read error: %v", err)
+			debugLog("[Derive WS] Read error: %v", err)
 			return
 		}
 
+		// First try to parse as a subscription update
+		var subMsg struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(message, &subMsg); err == nil && subMsg.Method == "subscription" {
+			// Handle subscription update
+			c.handleSubscriptionUpdate(subMsg.Params)
+			continue
+		}
+
+		// Otherwise handle as a response
 		var msg struct {
 			ID     string          `json:"id"`
 			Result json.RawMessage `json:"result"`
 			Error  json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("[Derive WS] Failed to parse message: %v", err)
+			debugLog("[Derive WS] Failed to parse message: %v", err)
 			continue
 		}
 
@@ -194,6 +222,76 @@ func (c *DeriveWSClient) handleMessages() {
 	}
 }
 
+// handleSubscriptionUpdate processes subscription updates (orderbook, trades, etc)
+func (c *DeriveWSClient) handleSubscriptionUpdate(params json.RawMessage) {
+	var update struct {
+		Channel string `json:"channel"`
+		Data    struct {
+			Timestamp      int64           `json:"timestamp"`
+			InstrumentName string          `json:"instrument_name"`
+			Bids           [][]json.Number `json:"bids"` // [price, size]
+			Asks           [][]json.Number `json:"asks"` // [price, size]
+			ChangeID       int64           `json:"change_id"`
+		} `json:"data"`
+	}
+	
+	if err := json.Unmarshal(params, &update); err != nil {
+		debugLog("[Derive WS] Failed to parse subscription update: %v", err)
+		return
+	}
+	
+	// Check if this is an orderbook update
+	if strings.HasPrefix(update.Channel, "orderbook.") {
+		c.updateOrderBook(update.Data.InstrumentName, &update.Data)
+	}
+}
+
+// updateOrderBook updates the cached orderbook for an instrument
+func (c *DeriveWSClient) updateOrderBook(instrument string, data *struct {
+	Timestamp      int64           `json:"timestamp"`
+	InstrumentName string          `json:"instrument_name"`
+	Bids           [][]json.Number `json:"bids"`
+	Asks           [][]json.Number `json:"asks"`
+	ChangeID       int64           `json:"change_id"`
+}) {
+	// Convert bids and asks to OrderBookLevel
+	bids := make([]OrderBookLevel, 0, len(data.Bids))
+	for _, bid := range data.Bids {
+		if len(bid) >= 2 {
+			price, _ := decimal.NewFromString(bid[0].String())
+			amount, _ := decimal.NewFromString(bid[1].String())
+			bids = append(bids, OrderBookLevel{
+				Price: price,
+				Size:  amount,
+			})
+		}
+	}
+	
+	asks := make([]OrderBookLevel, 0, len(data.Asks))
+	for _, ask := range data.Asks {
+		if len(ask) >= 2 {
+			price, _ := decimal.NewFromString(ask[0].String())
+			amount, _ := decimal.NewFromString(ask[1].String())
+			asks = append(asks, OrderBookLevel{
+				Price: price,
+				Size:  amount,
+			})
+		}
+	}
+	
+	// Update cached orderbook
+	c.orderbookMu.Lock()
+	c.orderbooks[instrument] = &OrderBookData{
+		Bids:      bids,
+		Asks:      asks,
+		Timestamp: time.Unix(0, data.Timestamp*1e6), // Convert microseconds to nanoseconds
+		ChangeID:  data.ChangeID,
+	}
+	c.orderbookMu.Unlock()
+	
+	debugLog("[Derive WS] Updated orderbook for %s: %d bids, %d asks", instrument, len(bids), len(asks))
+}
+
 // sendRequest sends a request and returns a channel for the response
 func (c *DeriveWSClient) sendRequest(req map[string]interface{}) <-chan json.RawMessage {
 	respChan := make(chan json.RawMessage, 1)
@@ -205,15 +303,47 @@ func (c *DeriveWSClient) sendRequest(req map[string]interface{}) <-chan json.Raw
 
 	// Marshal to JSON to log exact format
 	jsonBytes, _ := json.Marshal(req)
-	log.Printf("[Derive WS] Sending JSON: %s", string(jsonBytes))
+	debugLog("[Derive WS] Sending JSON: %s", string(jsonBytes))
 	
 	if err := c.conn.WriteJSON(req); err != nil {
-		log.Printf("[Derive WS] Failed to send request: %v", err)
+		debugLog("[Derive WS] Failed to send request: %v", err)
 		close(respChan)
 		return respChan
 	}
 
 	return respChan
+}
+
+// DebugOrder sends order to order_debug endpoint to verify signature
+func (c *DeriveWSClient) DebugOrder(order map[string]interface{}) (map[string]interface{}, error) {
+	id := fmt.Sprintf("%d", time.Now().UnixMilli())
+	
+	// Use JSON-RPC format
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method": "private/order_debug",
+		"params": order,
+		"id":     id,
+	}
+	
+	debugLog("[Derive WS] Sending order_debug request")
+	
+	respChan := c.sendRequest(req)
+	
+	select {
+	case resp := <-respChan:
+		debugLog("[Derive WS] Order debug response: %s", string(resp))
+		
+		var result map[string]interface{}
+		if err := json.Unmarshal(resp, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse debug response: %w", err)
+		}
+		
+		return result, nil
+		
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("order debug timeout")
+	}
 }
 
 // SubmitOrder submits an order via WebSocket
@@ -228,32 +358,44 @@ func (c *DeriveWSClient) SubmitOrder(order map[string]interface{}) (*DeriveOrder
 		"id":     id,
 	}
 
-	log.Printf("[Derive WS] Submitting order: %+v", order)
+	debugLog("[Derive WS] Submitting order: %+v", order)
 	
 	respChan := c.sendRequest(req)
 	
 	select {
 	case resp := <-respChan:
-		log.Printf("[Derive WS] Order response: %s", string(resp))
+		debugLog("[Derive WS] Order response: %s", string(resp))
 		
 		// First check if there's an error
 		var errorCheck struct {
 			Error *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-				Data    *struct {
-					Limit     string `json:"limit"`
-					Bandwidth string `json:"bandwidth"`
-				} `json:"data"`
+				Code    int         `json:"code"`
+				Message string      `json:"message"`
+				Data    interface{} `json:"data"`
 			} `json:"error"`
 		}
 		if err := json.Unmarshal(resp, &errorCheck); err == nil && errorCheck.Error != nil {
+			// Log the full error for debugging
+			debugLog("[Derive WS] Order error detected: code=%d, message=%s, data=%v", 
+				errorCheck.Error.Code, errorCheck.Error.Message, errorCheck.Error.Data)
+			
 			// If we get price band error, include bandwidth info
-			if errorCheck.Error.Code == 11013 && errorCheck.Error.Data != nil {
-				return nil, fmt.Errorf("order error: %s (limit: %s, bandwidth: %s)", 
-					errorCheck.Error.Message, errorCheck.Error.Data.Limit, errorCheck.Error.Data.Bandwidth)
+			if errorCheck.Error.Code == 11013 {
+				// Try to parse data as bandwidth struct
+				if dataMap, ok := errorCheck.Error.Data.(map[string]interface{}); ok {
+					limit, _ := dataMap["limit"].(string)
+					bandwidth, _ := dataMap["bandwidth"].(string)
+					return nil, fmt.Errorf("order error: %s (limit: %s, bandwidth: %s)", 
+						errorCheck.Error.Message, limit, bandwidth)
+				}
 			}
-			return nil, fmt.Errorf("order error: %s", errorCheck.Error.Message)
+			// For signature errors, include the data field if it's a string
+			if errorCheck.Error.Code == 14014 {
+				if dataStr, ok := errorCheck.Error.Data.(string); ok && dataStr != "" {
+					return nil, fmt.Errorf("order error: %s - %s", errorCheck.Error.Message, dataStr)
+				}
+			}
+			return nil, fmt.Errorf("order error: %s (code: %d)", errorCheck.Error.Message, errorCheck.Error.Code)
 		}
 		
 		// Try to parse the successful response
@@ -279,7 +421,7 @@ func (c *DeriveWSClient) SubmitOrder(order map[string]interface{}) (*DeriveOrder
 			result.Result.InstrumentName = instrumentName
 		}
 		
-		log.Printf("[Derive WS] Order placed - ID: %s, Status: %s", result.Result.OrderID, result.Result.Status)
+		debugLog("[Derive WS] Order placed - ID: %s, Status: %s", result.Result.OrderID, result.Result.Status)
 		
 		return result, nil
 		
@@ -301,7 +443,7 @@ func (c *DeriveWSClient) GetOpenOrders(subaccountID uint64) ([]map[string]interf
 		"id": id,
 	}
 	
-	log.Printf("[Derive WS] Querying open orders for subaccount %d", subaccountID)
+	debugLog("[Derive WS] Querying open orders for subaccount %d", subaccountID)
 	
 	respChan := c.sendRequest(req)
 	
@@ -364,7 +506,7 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 		"id": id,
 	}
 	
-	log.Printf("[Derive WS] Querying positions for subaccount %d", subaccountID)
+	debugLog("[Derive WS] Querying positions for subaccount %d", subaccountID)
 	
 	respChan := c.sendRequest(req)
 	
@@ -389,7 +531,7 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 			return nil, fmt.Errorf("get positions error: %s", result.Error.Message)
 		}
 		
-		log.Printf("[Derive WS] Found %d positions", len(result.Result.Positions))
+		debugLog("[Derive WS] Found %d positions", len(result.Result.Positions))
 		
 		return result.Result.Positions, nil
 		
@@ -401,4 +543,67 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 // Close closes the WebSocket connection
 func (c *DeriveWSClient) Close() error {
 	return c.conn.Close()
+}
+
+// SubscribeOrderBook subscribes to orderbook updates for an instrument
+func (c *DeriveWSClient) SubscribeOrderBook(instrument string, depth int) error {
+	// Determine depth parameter
+	depthParam := "10"
+	if depth > 10 && depth <= 20 {
+		depthParam = "20"
+	} else if depth > 20 {
+		depthParam = "100"
+	}
+	
+	channel := fmt.Sprintf("orderbook.%s.1.%s", instrument, depthParam)
+	
+	// Check if already subscribed
+	c.orderbookMu.Lock()
+	if c.orderbookSubs[channel] {
+		c.orderbookMu.Unlock()
+		return nil
+	}
+	c.orderbookSubs[channel] = true
+	c.orderbookMu.Unlock()
+	
+	// Subscribe via WebSocket
+	msg := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "subscribe",
+		"params": map[string]interface{}{
+			"channels": []string{channel},
+		},
+		"id": fmt.Sprintf("subscribe_%s_%d", instrument, time.Now().UnixNano()),
+	}
+	
+	c.mu.Lock()
+	err := c.conn.WriteJSON(msg)
+	c.mu.Unlock()
+	
+	if err != nil {
+		c.orderbookMu.Lock()
+		delete(c.orderbookSubs, channel)
+		c.orderbookMu.Unlock()
+		return fmt.Errorf("failed to subscribe to orderbook: %w", err)
+	}
+	
+	debugLog("[Derive WS] Subscribed to orderbook channel: %s", channel)
+	return nil
+}
+
+// GetOrderBook returns the cached orderbook for an instrument
+func (c *DeriveWSClient) GetOrderBook(instrument string) *OrderBookData {
+	c.orderbookMu.RLock()
+	defer c.orderbookMu.RUnlock()
+	
+	if ob, ok := c.orderbooks[instrument]; ok {
+		// Return a copy to avoid race conditions
+		return &OrderBookData{
+			Bids:      append([]OrderBookLevel{}, ob.Bids...),
+			Asks:      append([]OrderBookLevel{}, ob.Asks...),
+			Timestamp: ob.Timestamp,
+			ChangeID:  ob.ChangeID,
+		}
+	}
+	return nil
 }

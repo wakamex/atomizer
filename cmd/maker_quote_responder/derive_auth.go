@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -76,9 +75,9 @@ func (d *DeriveAuth) SignMessage(message string) (string, error) {
 	prefixedMessage := fmt.Sprintf("\x19Ethereum Signed Message:\n%d%s", len(message), message)
 	hash := crypto.Keccak256Hash([]byte(prefixedMessage))
 	
-	log.Printf("[Derive Auth] Signing message: '%s'", message)
-	log.Printf("[Derive Auth] Prefixed message: '%s'", prefixedMessage)
-	log.Printf("[Derive Auth] Message hash: %s", hash.Hex())
+	debugLog("[Derive Auth] Signing message: '%s'", message)
+	debugLog("[Derive Auth] Prefixed message: '%s'", prefixedMessage)
+	debugLog("[Derive Auth] Message hash: %s", hash.Hex())
 	
 	signature, err := crypto.Sign(hash.Bytes(), d.privateKey)
 	if err != nil {
@@ -89,7 +88,7 @@ func (d *DeriveAuth) SignMessage(message string) (string, error) {
 	signature[64] += 27
 	
 	sigHex := hex.EncodeToString(signature)
-	log.Printf("[Derive Auth] Raw signature: %s", sigHex)
+	debugLog("[Derive Auth] Raw signature: %s", sigHex)
 	
 	return "0x" + sigHex, nil
 }
