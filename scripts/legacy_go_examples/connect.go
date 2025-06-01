@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/wakamex/ryskV12-cli/ryskcore"
+	"github.com/wakamex/rysk-v12-cli/ryskcore"
 )
 
 const (

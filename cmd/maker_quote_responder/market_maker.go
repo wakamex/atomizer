@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,11 +37,20 @@ type MarketMaker struct {
 	
 	// Error suppression
 	orderbookErrorLogged map[string]bool
+	
+	// Per-instrument update locks to prevent concurrent updates
+	updateLocks map[string]*sync.Mutex
 }
 
 // NewMarketMaker creates a new market maker instance
 func NewMarketMaker(config *MarketMakerConfig, exchange MarketMakerExchange) *MarketMaker {
 	ctx, cancel := context.WithCancel(context.Background())
+	
+	// Initialize update locks for each instrument
+	updateLocks := make(map[string]*sync.Mutex)
+	for _, instrument := range config.Instruments {
+		updateLocks[instrument] = &sync.Mutex{}
+	}
 	
 	return &MarketMaker{
 		config:             config,
@@ -53,6 +63,7 @@ func NewMarketMaker(config *MarketMakerConfig, exchange MarketMakerExchange) *Ma
 		ctx:                ctx,
 		cancel:             cancel,
 		orderbookErrorLogged: make(map[string]bool),
+		updateLocks:        updateLocks,
 	}
 }
 
@@ -188,6 +199,11 @@ func (mm *MarketMaker) updateAllQuotes() {
 
 // updateQuotesForInstrument updates quotes for a specific instrument
 func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
+	// Prevent concurrent updates for the same instrument
+	if lock, exists := mm.updateLocks[instrument]; exists {
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	mm.mu.RLock()
 	ticker, exists := mm.latestTickers[instrument]
 	mm.mu.RUnlock()
@@ -307,7 +323,11 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 			}
 			} else {
 				// Just cancel - we'll recreate below
-				mm.cancelOrder(bidOrder.OrderID)
+				if !mm.cancelOrder(bidOrder.OrderID) {
+					// Failed to cancel, don't create a new order to avoid duplicates
+					log.Printf("Failed to cancel bid order %s, skipping recreation to avoid duplicates", bidOrder.OrderID)
+					replacedBid = true // Mark as "replaced" to skip recreation
+				}
 			}
 		}
 		
@@ -339,7 +359,11 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 			}
 			} else {
 				// Just cancel - we'll recreate below
-				mm.cancelOrder(askOrder.OrderID)
+				if !mm.cancelOrder(askOrder.OrderID) {
+					// Failed to cancel, don't create a new order to avoid duplicates
+					log.Printf("Failed to cancel ask order %s, skipping recreation to avoid duplicates", askOrder.OrderID)
+					replacedAsk = true // Mark as "replaced" to skip recreation
+				}
 			}
 		}
 		
@@ -350,10 +374,41 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 		
 		// Otherwise, fall back to cancel and recreate for failed replacements
 		if !replacedBid && bidOrder != nil && bidOrder.OrderID != "" {
-			mm.cancelOrder(bidOrder.OrderID)
+			if !mm.cancelOrder(bidOrder.OrderID) {
+				// Failed to cancel, skip recreation
+				log.Printf("Failed to cancel bid order %s in fallback, skipping recreation", bidOrder.OrderID)
+				replacedBid = true
+			}
 		}
 		if !replacedAsk && askOrder != nil && askOrder.OrderID != "" {
-			mm.cancelOrder(askOrder.OrderID)
+			if !mm.cancelOrder(askOrder.OrderID) {
+				// Failed to cancel, skip recreation
+				log.Printf("Failed to cancel ask order %s in fallback, skipping recreation", askOrder.OrderID)
+				replacedAsk = true
+			}
+		}
+		
+		// If we had any failed cancellations, wait a bit and verify order state
+		if (!replacedBid && bidOrder != nil) || (!replacedAsk && askOrder != nil) {
+			time.Sleep(1 * time.Second) // Wait for any pending operations to settle
+			
+			// Re-verify order state from exchange
+			openOrders, err := mm.exchange.GetOpenOrders()
+			if err == nil {
+				// Check if the orders we tried to cancel still exist
+				for _, order := range openOrders {
+					if order.Instrument == instrument {
+						if order.Side == "buy" && bidOrder != nil && order.OrderID == bidOrder.OrderID {
+							log.Printf("Bid order %s still exists after cancel attempt, skipping new order", order.OrderID)
+							replacedBid = true
+						}
+						if order.Side == "sell" && askOrder != nil && order.OrderID == askOrder.OrderID {
+							log.Printf("Ask order %s still exists after cancel attempt, skipping new order", order.OrderID)
+							replacedAsk = true
+						}
+					}
+				}
+			}
 		}
 		
 		// Place new orders for any that weren't replaced
@@ -462,7 +517,7 @@ func (mm *MarketMaker) placeQuotes(instrument string, bidPrice, askPrice decimal
 	mm.stats.OrdersPlaced += 2
 	mm.mu.Unlock()
 	
-	log.Printf("Placed quotes for %s: Bid %.4f, Ask %.4f", instrument, bidPrice, askPrice)
+	log.Printf("Placed quotes for %s: Bid %s, Ask %s", instrument, bidPrice.String(), askPrice.String())
 	
 	return nil
 }
@@ -517,24 +572,64 @@ func (mm *MarketMaker) updateOrderTracking(oldOrderID, newOrderID, instrument, s
 	mm.ordersByInstrument[instrument][side] = newOrder
 }
 
-// cancelOrder cancels a single order
-func (mm *MarketMaker) cancelOrder(orderID string) {
-	if err := mm.exchange.CancelOrder(orderID); err != nil {
-		log.Printf("Failed to cancel order %s: %v", orderID, err)
-	} else {
-		mm.mu.Lock()
-		if order, exists := mm.activeOrders[orderID]; exists {
-			delete(mm.activeOrders, orderID)
-			if instrumentOrders, exists := mm.ordersByInstrument[order.Instrument]; exists {
-				delete(instrumentOrders, order.Side)
-				if len(instrumentOrders) == 0 {
-					delete(mm.ordersByInstrument, order.Instrument)
+// cancelOrder cancels a single order and returns whether it was successfully cancelled
+func (mm *MarketMaker) cancelOrder(orderID string) bool {
+	// Try to cancel with retries for internal errors
+	var lastErr error
+	for retries := 0; retries < 3; retries++ {
+		if retries > 0 {
+			time.Sleep(500 * time.Millisecond) // Wait before retry
+		}
+		
+		err := mm.exchange.CancelOrder(orderID)
+		if err == nil {
+			// Success - remove from tracking
+			mm.mu.Lock()
+			if order, exists := mm.activeOrders[orderID]; exists {
+				delete(mm.activeOrders, orderID)
+				if instrumentOrders, exists := mm.ordersByInstrument[order.Instrument]; exists {
+					delete(instrumentOrders, order.Side)
+					if len(instrumentOrders) == 0 {
+						delete(mm.ordersByInstrument, order.Instrument)
+					}
+				}
+				mm.stats.OrdersCancelled++
+			}
+			mm.mu.Unlock()
+			return true
+		}
+		
+		lastErr = err
+		// If it's an "order not found" error, treat as success (order already gone)
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "Order does not exist") {
+			log.Printf("Order %s already cancelled or doesn't exist", orderID)
+			// Remove from tracking
+			mm.mu.Lock()
+			if order, exists := mm.activeOrders[orderID]; exists {
+				delete(mm.activeOrders, orderID)
+				if instrumentOrders, exists := mm.ordersByInstrument[order.Instrument]; exists {
+					delete(instrumentOrders, order.Side)
+					if len(instrumentOrders) == 0 {
+						delete(mm.ordersByInstrument, order.Instrument)
+					}
 				}
 			}
-			mm.stats.OrdersCancelled++
+			mm.mu.Unlock()
+			return true
 		}
-		mm.mu.Unlock()
+		
+		// For "Internal error", retry
+		if strings.Contains(err.Error(), "Internal error") {
+			log.Printf("Internal error cancelling order %s, retry %d/3", orderID, retries+1)
+			continue
+		}
+		
+		// For other errors, don't retry
+		break
 	}
+	
+	log.Printf("Failed to cancel order %s after retries: %v", orderID, lastErr)
+	return false
 }
 
 // placeSingleQuote places a single buy or sell order

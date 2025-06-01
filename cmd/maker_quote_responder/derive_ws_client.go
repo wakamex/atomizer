@@ -314,6 +314,38 @@ func (c *DeriveWSClient) sendRequest(req map[string]interface{}) <-chan json.Raw
 	return respChan
 }
 
+// DebugOrder sends order to order_debug endpoint to verify signature
+func (c *DeriveWSClient) DebugOrder(order map[string]interface{}) (map[string]interface{}, error) {
+	id := fmt.Sprintf("%d", time.Now().UnixMilli())
+	
+	// Use JSON-RPC format
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method": "private/order_debug",
+		"params": order,
+		"id":     id,
+	}
+	
+	debugLog("[Derive WS] Sending order_debug request")
+	
+	respChan := c.sendRequest(req)
+	
+	select {
+	case resp := <-respChan:
+		debugLog("[Derive WS] Order debug response: %s", string(resp))
+		
+		var result map[string]interface{}
+		if err := json.Unmarshal(resp, &result); err != nil {
+			return nil, fmt.Errorf("failed to parse debug response: %w", err)
+		}
+		
+		return result, nil
+		
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("order debug timeout")
+	}
+}
+
 // SubmitOrder submits an order via WebSocket
 func (c *DeriveWSClient) SubmitOrder(order map[string]interface{}) (*DeriveOrderResponse, error) {
 	id := fmt.Sprintf("%d", time.Now().UnixMilli())
@@ -337,21 +369,33 @@ func (c *DeriveWSClient) SubmitOrder(order map[string]interface{}) (*DeriveOrder
 		// First check if there's an error
 		var errorCheck struct {
 			Error *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-				Data    *struct {
-					Limit     string `json:"limit"`
-					Bandwidth string `json:"bandwidth"`
-				} `json:"data"`
+				Code    int         `json:"code"`
+				Message string      `json:"message"`
+				Data    interface{} `json:"data"`
 			} `json:"error"`
 		}
 		if err := json.Unmarshal(resp, &errorCheck); err == nil && errorCheck.Error != nil {
+			// Log the full error for debugging
+			debugLog("[Derive WS] Order error detected: code=%d, message=%s, data=%v", 
+				errorCheck.Error.Code, errorCheck.Error.Message, errorCheck.Error.Data)
+			
 			// If we get price band error, include bandwidth info
-			if errorCheck.Error.Code == 11013 && errorCheck.Error.Data != nil {
-				return nil, fmt.Errorf("order error: %s (limit: %s, bandwidth: %s)", 
-					errorCheck.Error.Message, errorCheck.Error.Data.Limit, errorCheck.Error.Data.Bandwidth)
+			if errorCheck.Error.Code == 11013 {
+				// Try to parse data as bandwidth struct
+				if dataMap, ok := errorCheck.Error.Data.(map[string]interface{}); ok {
+					limit, _ := dataMap["limit"].(string)
+					bandwidth, _ := dataMap["bandwidth"].(string)
+					return nil, fmt.Errorf("order error: %s (limit: %s, bandwidth: %s)", 
+						errorCheck.Error.Message, limit, bandwidth)
+				}
 			}
-			return nil, fmt.Errorf("order error: %s", errorCheck.Error.Message)
+			// For signature errors, include the data field if it's a string
+			if errorCheck.Error.Code == 14014 {
+				if dataStr, ok := errorCheck.Error.Data.(string); ok && dataStr != "" {
+					return nil, fmt.Errorf("order error: %s - %s", errorCheck.Error.Message, dataStr)
+				}
+			}
+			return nil, fmt.Errorf("order error: %s (code: %d)", errorCheck.Error.Message, errorCheck.Error.Code)
 		}
 		
 		// Try to parse the successful response

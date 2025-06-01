@@ -58,15 +58,28 @@ type DeriveAction struct {
 
 // Sign signs the action using EIP-712
 func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
-	// Protocol constants for mainnet - updated based on testing
-	domainSeparator := common.HexToHash("0x8f06151ae86a1e59b6cf39212fb0978551b4dcafefd44e3a8b860a9c0b1e6141")
-	actionTypehash := common.HexToHash("0x5147386a8c7e1c2fb020f0ad9cd5e9c6e28dbce75c86560d0956e15bc50e3041")
+	// Protocol constants for mainnet - FROM PRODUCTION CODE (working test values)
+	domainSeparator := common.HexToHash("0xd96e5f90797da7ec8dc4e276260c7f3f87fedf68775fbe1ef116e996fc60441b")
+	actionTypehash := common.HexToHash("0x4d7a9f27c403ff9c0f19bce61d76d82f9aa29f8d6d4b0c5474607d9770d1af17")
 	
-	debugLog("[EIP-712] Using domain separator: %s", domainSeparator.Hex())
-	debugLog("[EIP-712] Using action typehash: %s", actionTypehash.Hex())
+	debugLog("Sign: Starting EIP-712 signature generation")
+	debugLog("Sign: Using domain separator: %s", domainSeparator.Hex())
+	debugLog("Sign: Using action typehash: %s", actionTypehash.Hex())
+	
+	// Log input values for module data
+	debugLog("Sign: Module data inputs:")
+	debugLog("  AssetAddress: %s", a.AssetAddress)
+	debugLog("  SubID (string): %s", a.SubID)
 	
 	// Encode module data
 	subID, _ := new(big.Int).SetString(a.SubID, 10)
+	debugLog("  SubID (big.Int): %s", subID.String())
+	debugLog("  LimitPrice: %s", a.LimitPrice.String())
+	debugLog("  Amount: %s", a.Amount.String())
+	debugLog("  MaxFee: %s", a.MaxFee.String())
+	debugLog("  RecipientID: %d", a.RecipientID)
+	debugLog("  IsBid: %v", a.IsBid)
+	
 	moduleData, err := encodeTradeModuleData(
 		common.HexToAddress(a.AssetAddress),
 		subID,
@@ -80,9 +93,20 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 		return err
 	}
 	
+	debugLog("Sign: Module data encoded (hex): %s", hex.EncodeToString(moduleData))
+	
 	// Hash module data
 	moduleDataHash := crypto.Keccak256Hash(moduleData)
-	debugLog("[EIP-712] Module data hash: %s", moduleDataHash.Hex())
+	debugLog("Sign: Module data hash: %s", moduleDataHash.Hex())
+	
+	// Log action struct values
+	debugLog("Sign: Action struct values:")
+	debugLog("  SubaccountID: %d", a.SubaccountID)
+	debugLog("  Nonce: %d", a.Nonce)
+	debugLog("  ModuleAddress: %s", a.ModuleAddress)
+	debugLog("  SignatureExpirySec: %d", a.SignatureExpirySec)
+	debugLog("  Owner: %s", a.Owner)
+	debugLog("  Signer: %s", a.Signer)
 	
 	// Encode action
 	actionData, err := encodeAction(
@@ -95,19 +119,22 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 		common.HexToAddress(a.Owner),
 		common.HexToAddress(a.Signer),
 	)
-	debugLog("[EIP-712] Action data encoded, length: %d", len(actionData))
+	debugLog("Sign: Action data encoded, length: %d", len(actionData))
+	debugLog("Sign: Action data (hex): %s", hex.EncodeToString(actionData))
 	if err != nil {
 		return err
 	}
 	
 	// Create typed data hash
 	actionHash := crypto.Keccak256Hash(actionData)
-	debugLog("[EIP-712] Action hash: %s", actionHash.Hex())
+	debugLog("Sign: Action hash: %s", actionHash.Hex())
 	
 	message := append([]byte{0x19, 0x01}, domainSeparator.Bytes()...)
 	message = append(message, actionHash.Bytes()...)
+	debugLog("Sign: Full message to hash (hex): %s", hex.EncodeToString(message))
+	
 	typedDataHash := crypto.Keccak256Hash(message)
-	debugLog("[EIP-712] Final typed data hash to sign: %s", typedDataHash.Hex())
+	debugLog("Sign: Final typed data hash to sign: %s", typedDataHash.Hex())
 	
 	// Sign
 	signature, err := crypto.Sign(typedDataHash.Bytes(), privateKey)
@@ -119,6 +146,8 @@ func (a *DeriveAction) Sign(privateKey *ecdsa.PrivateKey) error {
 	signature[64] += 27
 	
 	a.Signature = "0x" + hex.EncodeToString(signature)
+	debugLog("Sign: Final signature: %s", a.Signature)
+	
 	return nil
 }
 
