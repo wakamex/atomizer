@@ -96,6 +96,10 @@ type MarketMakerConfig struct {
 	// Quote improvement
 	Improvement      decimal.Decimal // Amount to improve quotes by (tighten spread)
 	ImprovementReferenceSize decimal.Decimal // Minimum size for best bid/ask selection
+	
+	// One-sided quoting
+	BidOnly          bool // Only place bid orders (buy side)
+	AskOnly          bool // Only place ask orders (sell side)
 }
 
 // DefaultMarketMakerConfig returns a default configuration
