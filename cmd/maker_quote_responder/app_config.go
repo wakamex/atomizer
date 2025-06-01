@@ -41,29 +41,51 @@ type AppConfig struct {
 func LoadConfig() *AppConfig {
 	cfg := &AppConfig{}
 
-	flag.StringVar(&cfg.WebSocketURL, "websocket_url", "wss://rip-testnet.rysk.finance/maker", "WebSocket URL for RFQ stream and quote submission")
-	flag.StringVar(&cfg.RFQAssetAddressesCSV, "rfq_asset_addresses", "", "Comma-separated list of asset addresses for RFQ streams (e.g., 0xAsset1,0xAsset2)")
-	flag.StringVar(&cfg.DummyPrice, "dummy_price", "1000000", "Dummy price to quote (ensure format matches Rysk requirements, e.g., units)")
-	flag.Int64Var(&cfg.QuoteValidDurationSeconds, "quote_valid_duration_seconds", 30, "How long your quotes will be valid in seconds")
-	flag.StringVar(&cfg.ExchangeName, "exchange", "derive", "Exchange to use for hedging (e.g., derive, deribit, okx, bybit)")
-	flag.BoolVar(&cfg.ExchangeTestMode, "exchange_test_mode", false, "Use exchange testnet (true) or mainnet (false)")
-	
-	// Arbitrage flags
-	flag.StringVar(&cfg.HTTPPort, "http_port", "8080", "Port for HTTP API server")
-	flag.Float64Var(&cfg.MaxPositionDelta, "max_position_delta", 10.0, "Maximum position delta exposure")
-	flag.Float64Var(&cfg.MinLiquidityScore, "min_liquidity_score", 0.001, "Minimum liquidity score for trades")
-	flag.BoolVar(&cfg.EnableManualTrades, "enable_manual_trades", true, "Enable manual trade API")
-	flag.BoolVar(&cfg.EnableGammaHedging, "enable_gamma_hedging", false, "Enable gamma hedging")
-	flag.Float64Var(&cfg.GammaThreshold, "gamma_threshold", 0.1, "Gamma threshold for hedging")
-	flag.StringVar(&cfg.CacheBackend, "cache_backend", "file", "Cache backend: file or valkey")
-	flag.StringVar(&cfg.ValkeyAddr, "valkey_addr", "localhost:6379", "Valkey server address")
-	
-	flag.Parse()
+	// Check if flags have already been parsed (e.g., by a subcommand)
+	if flag.Parsed() {
+		// If already parsed, just load from environment
+		cfg.WebSocketURL = "wss://rip-testnet.rysk.finance/maker"
+		cfg.DummyPrice = "1000000"
+		cfg.QuoteValidDurationSeconds = 30
+		cfg.ExchangeName = "derive"
+		cfg.HTTPPort = "8080"
+		cfg.MaxPositionDelta = 10.0
+		cfg.MinLiquidityScore = 0.001
+		cfg.EnableManualTrades = true
+		cfg.GammaThreshold = 0.1
+		cfg.CacheBackend = "file"
+		cfg.ValkeyAddr = "localhost:6379"
+	} else {
+		flag.StringVar(&cfg.WebSocketURL, "websocket_url", "wss://rip-testnet.rysk.finance/maker", "WebSocket URL for RFQ stream and quote submission")
+		flag.StringVar(&cfg.RFQAssetAddressesCSV, "rfq_asset_addresses", "", "Comma-separated list of asset addresses for RFQ streams (e.g., 0xAsset1,0xAsset2)")
+		flag.StringVar(&cfg.DummyPrice, "dummy_price", "1000000", "Dummy price to quote (ensure format matches Rysk requirements, e.g., units)")
+		flag.Int64Var(&cfg.QuoteValidDurationSeconds, "quote_valid_duration_seconds", 30, "How long your quotes will be valid in seconds")
+		flag.StringVar(&cfg.ExchangeName, "exchange", "derive", "Exchange to use for hedging (e.g., derive, deribit, okx, bybit)")
+		flag.BoolVar(&cfg.ExchangeTestMode, "exchange_test_mode", false, "Use exchange testnet (true) or mainnet (false)")
+		
+		// Arbitrage flags
+		flag.StringVar(&cfg.HTTPPort, "http_port", "8080", "Port for HTTP API server")
+		flag.Float64Var(&cfg.MaxPositionDelta, "max_position_delta", 10.0, "Maximum position delta exposure")
+		flag.Float64Var(&cfg.MinLiquidityScore, "min_liquidity_score", 0.001, "Minimum liquidity score for trades")
+		flag.BoolVar(&cfg.EnableManualTrades, "enable_manual_trades", true, "Enable manual trade API")
+		flag.BoolVar(&cfg.EnableGammaHedging, "enable_gamma_hedging", false, "Enable gamma hedging")
+		flag.Float64Var(&cfg.GammaThreshold, "gamma_threshold", 0.1, "Gamma threshold for hedging")
+		flag.StringVar(&cfg.CacheBackend, "cache_backend", "file", "Cache backend: file or valkey")
+		flag.StringVar(&cfg.ValkeyAddr, "valkey_addr", "localhost:6379", "Valkey server address")
+		
+		flag.Parse()
+	}
 
 	cfg.MakerAddress = os.Getenv("MAKER_ADDRESS")
 	cfg.PrivateKey = os.Getenv("PRIVATE_KEY")
 	cfg.DeribitApiKey = os.Getenv("DERIBIT_API_KEY")
 	cfg.DeribitApiSecret = os.Getenv("DERIBIT_API_SECRET")
+	
+	// Skip validation if running as a subcommand (flags already parsed)
+	if flag.Parsed() && cfg.RFQAssetAddressesCSV == "" {
+		// Running as subcommand, skip RFQ validation
+		return cfg
+	}
 	
 	if cfg.RFQAssetAddressesCSV == "" {
 		log.Fatal("Error: --rfq_asset_addresses is required.")

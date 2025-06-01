@@ -74,6 +74,17 @@ func main() {
 		os.Exit(0)
 	}
 	
+	// Check for gamma-hedger subcommand
+	if len(os.Args) > 1 && os.Args[1] == "gamma-hedger" {
+		log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+		buildHash := getBuildHash()
+		log.Printf("========================================")
+		log.Printf("Build hash: %s", buildHash)
+		log.Printf("========================================")
+		RunGammaHedger(os.Args[2:])
+		os.Exit(0)
+	}
+	
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	
 	// Print build hash as first output

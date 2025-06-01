@@ -41,6 +41,15 @@ type TickerUpdate struct {
 	LastPrice    decimal.Decimal
 	MarkPrice    decimal.Decimal
 	Timestamp    time.Time
+	// Greeks for options
+	Delta        *decimal.Decimal
+	Gamma        *decimal.Decimal
+	Vega         *decimal.Decimal
+	Theta        *decimal.Decimal
+	// Option details
+	Expiry       *time.Time
+	Strike       *decimal.Decimal
+	OptionType   *string
 }
 
 // OrderBookLevel represents a price level in the order book

@@ -169,6 +169,20 @@ func (d *DeriveMarketMakerExchange) fetchTicker(instrument string) (*TickerUpdat
 			BestAskAmount  string `json:"best_ask_amount"`
 			LastPrice      string `json:"last_price"`
 			MarkPrice      string `json:"mark_price"`
+			MinimumAmount  string `json:"minimum_amount"`
+			AmountStep     string `json:"amount_step"`
+			TickSize       string `json:"tick_size"`
+			OptionPricing  *struct {
+				Delta string `json:"delta"`
+				Gamma string `json:"gamma"`
+				Vega  string `json:"vega"`
+				Theta string `json:"theta"`
+			} `json:"option_pricing"`
+			OptionDetails *struct {
+				Expiry int64 `json:"expiry"`
+				Strike string `json:"strike"`
+				OptionType string `json:"option_type"`
+			} `json:"option_details"`
 		} `json:"result"`
 		Error *struct {
 			Message string `json:"message"`
@@ -191,7 +205,7 @@ func (d *DeriveMarketMakerExchange) fetchTicker(instrument string) (*TickerUpdat
 	lastPrice, _ := decimal.NewFromString(result.Result.LastPrice)
 	markPrice, _ := decimal.NewFromString(result.Result.MarkPrice)
 	
-	return &TickerUpdate{
+	ticker := &TickerUpdate{
 		Instrument:  result.Result.InstrumentName,
 		BestBid:     bestBid,
 		BestBidSize: bestBidAmount,
@@ -200,7 +214,37 @@ func (d *DeriveMarketMakerExchange) fetchTicker(instrument string) (*TickerUpdat
 		LastPrice:   lastPrice,
 		MarkPrice:   markPrice,
 		Timestamp:   time.Now(),
-	}, nil
+	}
+	
+	// Add Greeks if available (for options)
+	if result.Result.OptionPricing != nil {
+		delta, _ := decimal.NewFromString(result.Result.OptionPricing.Delta)
+		gamma, _ := decimal.NewFromString(result.Result.OptionPricing.Gamma)
+		vega, _ := decimal.NewFromString(result.Result.OptionPricing.Vega)
+		theta, _ := decimal.NewFromString(result.Result.OptionPricing.Theta)
+		
+		ticker.Delta = &delta
+		ticker.Gamma = &gamma
+		ticker.Vega = &vega
+		ticker.Theta = &theta
+	}
+	
+	// Add option details if available
+	if result.Result.OptionDetails != nil {
+		expiryTime := time.Unix(result.Result.OptionDetails.Expiry, 0)
+		ticker.Expiry = &expiryTime
+		
+		if result.Result.OptionDetails.Strike != "" {
+			strike, _ := decimal.NewFromString(result.Result.OptionDetails.Strike)
+			ticker.Strike = &strike
+		}
+		
+		if result.Result.OptionDetails.OptionType != "" {
+			ticker.OptionType = &result.Result.OptionDetails.OptionType
+		}
+	}
+	
+	return ticker, nil
 }
 
 // PlaceLimitOrder places a limit order on Derive
