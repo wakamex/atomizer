@@ -248,8 +248,8 @@ func (a *GammaDDHAlgo) HedgerAction(state *GammaDDHState, client WsClient, direc
 		openIDs = state.AskIDs
 	}
 
-	if amount.LessThan(ticker.MinimumAmount) {
-		log.Printf("Amount calculated too small: %s", amount)
+	if amount.Abs().LessThan(ticker.MinimumAmount) {
+		log.Printf("Amount calculated too small: %s (minimum: %s)", amount, ticker.MinimumAmount)
 		if len(openIDs) >= 1 {
 			return client.CancelByLabel(a.SubaccountID, label)
 		}

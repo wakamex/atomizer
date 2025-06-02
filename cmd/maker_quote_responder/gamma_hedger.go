@@ -80,7 +80,7 @@ func NewGammaHedger(exchange Exchange, config *AppConfig, hedgeManager *HedgeMan
 		deltaThreshold:  decimal.NewFromFloat(0.1),   // 0.1 ETH delta threshold
 		gammaThreshold:  decimal.NewFromFloat(0.01),  // 0.01 gamma threshold
 		hedgeInterval:   30 * time.Second,
-		minHedgeSize:    decimal.NewFromFloat(0.01),  // Min 0.01 ETH hedge
+		minHedgeSize:    decimal.NewFromFloat(0.1),   // Min 0.1 ETH hedge (exchange minimum)
 		ctx:             ctx,
 		cancel:          cancel,
 	}

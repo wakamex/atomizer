@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -127,12 +128,52 @@ func (d *DeriveMarketDataAdapter) fetchTickerFromAPI(instrumentName string) (*Ti
 }
 
 func (d *DeriveMarketDataAdapter) GetOrderbookExcludeMyOrders(instrumentName string) (*OrderbookData, error) {
-	// For simplicity, return mock data
-	// In production, would fetch from Derive API
-	return &OrderbookData{
-		Bids: [][]decimal.Decimal{{decimal.NewFromFloat(2999), decimal.NewFromFloat(10)}},
-		Asks: [][]decimal.Decimal{{decimal.NewFromFloat(3001), decimal.NewFromFloat(10)}},
-	}, nil
+	// Fetch real orderbook from Derive WebSocket
+	ob := d.wsClient.GetOrderBook(instrumentName)
+	if ob == nil {
+		return nil, fmt.Errorf("no orderbook data for %s", instrumentName)
+	}
+	
+	// Convert to OrderbookData format
+	orderbook := &OrderbookData{
+		Bids: [][]decimal.Decimal{},
+		Asks: [][]decimal.Decimal{},
+	}
+	
+	// Convert bids
+	for _, bid := range ob.Bids {
+		orderbook.Bids = append(orderbook.Bids, []decimal.Decimal{bid.Price, bid.Size})
+	}
+	
+	// Convert asks
+	for _, ask := range ob.Asks {
+		orderbook.Asks = append(orderbook.Asks, []decimal.Decimal{ask.Price, ask.Size})
+	}
+	
+	// If no orderbook data, subscribe and wait briefly
+	if len(orderbook.Bids) == 0 && len(orderbook.Asks) == 0 {
+		if err := d.wsClient.SubscribeOrderBook(instrumentName, 10); err != nil {
+			return nil, fmt.Errorf("failed to subscribe to orderbook: %w", err)
+		}
+		// Wait a moment for initial data
+		time.Sleep(500 * time.Millisecond)
+		
+		// Try again
+		ob = d.wsClient.GetOrderBook(instrumentName)
+		if ob != nil {
+			// Re-convert with new data
+			orderbook.Bids = nil
+			orderbook.Asks = nil
+			for _, bid := range ob.Bids {
+				orderbook.Bids = append(orderbook.Bids, []decimal.Decimal{bid.Price, bid.Size})
+			}
+			for _, ask := range ob.Asks {
+				orderbook.Asks = append(orderbook.Asks, []decimal.Decimal{ask.Price, ask.Size})
+			}
+		}
+	}
+	
+	return orderbook, nil
 }
 
 func (d *DeriveMarketDataAdapter) GetOrders(instrumentName string) []GammaOrder {
@@ -337,6 +378,15 @@ func RunGammaHedger(args []string) {
 		AmountTol:    decimal.NewFromFloat(0.01),
 		MidPriceTol:  decimal.NewFromFloat(0.0001),
 	}
+	
+	// Subscribe to ETH-PERP orderbook
+	log.Printf("Subscribing to ETH-PERP orderbook...")
+	if err := wsClient.SubscribeOrderBook("ETH-PERP", 10); err != nil {
+		log.Printf("Warning: Failed to subscribe to ETH-PERP orderbook: %v", err)
+	}
+	
+	// Wait for initial orderbook data
+	time.Sleep(1 * time.Second)
 	
 	// Create context
 	ctx, cancel := context.WithCancel(context.Background())

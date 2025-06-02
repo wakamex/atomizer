@@ -675,10 +675,24 @@ func (d *DeriveMarketMakerExchange) GetPositions() ([]ExchangePosition, error) {
 	}
 	
 	positions := make([]ExchangePosition, 0, len(rawPositions))
-	for _, raw := range rawPositions {
+	for i, raw := range rawPositions {
+		// Debug log first position to see field names (only if debug mode is enabled)
+		if i == 0 && debugMode {
+			log.Printf("DEBUG: First position raw data:")
+			for key, value := range raw {
+				log.Printf("  %s: %v (type: %T)", key, value, value)
+			}
+		}
+		
+		// Try both "amount" and "size" fields
+		amount := getFloat64(raw, "amount")
+		if amount == 0 {
+			amount = getFloat64(raw, "size")
+		}
+		
 		position := ExchangePosition{
 			InstrumentName: getString(raw, "instrument_name"),
-			Amount:         getFloat64(raw, "amount"),
+			Amount:         amount,
 			Direction:      getString(raw, "direction"),
 			AveragePrice:   getFloat64(raw, "average_price"),
 			MarkPrice:      getFloat64(raw, "mark_price"),
@@ -735,10 +749,15 @@ func getDecimal(m map[string]interface{}, key string) decimal.Decimal {
 }
 
 func getFloat64(m map[string]interface{}, key string) float64 {
-	if v, ok := m[key].(float64); ok {
+	switch v := m[key].(type) {
+	case float64:
 		return v
+	case string:
+		f, _ := strconv.ParseFloat(v, 64)
+		return f
+	default:
+		return 0
 	}
-	return 0
 }
 
 func getInt64(m map[string]interface{}, key string) int64 {

@@ -43,6 +43,9 @@ type MarketMaker struct {
 	
 	// Track orders that consistently fail to cancel (likely don't exist)
 	failedCancelAttempts map[string]int
+	
+	// Track last update time per instrument to prevent duplicate updates
+	lastUpdateTime map[string]time.Time
 }
 
 // NewMarketMaker creates a new market maker instance
@@ -68,6 +71,7 @@ func NewMarketMaker(config *MarketMakerConfig, exchange MarketMakerExchange) *Ma
 		orderbookErrorLogged: make(map[string]bool),
 		updateLocks:        updateLocks,
 		failedCancelAttempts: make(map[string]int),
+		lastUpdateTime:     make(map[string]time.Time),
 	}
 }
 
@@ -214,6 +218,21 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 		lock.Lock()
 		defer lock.Unlock()
 	}
+	
+	// Check if we recently updated this instrument (within 100ms)
+	mm.mu.RLock()
+	lastUpdate, exists := mm.lastUpdateTime[instrument]
+	mm.mu.RUnlock()
+	
+	if exists && time.Since(lastUpdate) < 100*time.Millisecond {
+		// Skip this update to prevent duplicates
+		return nil
+	}
+	
+	// Update the last update time
+	mm.mu.Lock()
+	mm.lastUpdateTime[instrument] = time.Now()
+	mm.mu.Unlock()
 	mm.mu.RLock()
 	ticker, exists := mm.latestTickers[instrument]
 	mm.mu.RUnlock()
