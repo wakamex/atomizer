@@ -101,6 +101,31 @@ func (mm *MarketMaker) Start() error {
 		return fmt.Errorf("failed to load active orders: %w", err)
 	}
 	
+	// Cancel all existing orders on startup
+	log.Printf("Cancelling all existing orders on startup...")
+	cancelCount := 0
+	mm.mu.RLock()
+	ordersCopy := make(map[string]*MarketMakerOrder)
+	for id, order := range mm.activeOrders {
+		ordersCopy[id] = order
+	}
+	mm.mu.RUnlock()
+	
+	for _, order := range ordersCopy {
+		if err := mm.exchange.CancelOrder(order.OrderID); err != nil {
+			log.Printf("Failed to cancel order %s: %v", order.OrderID, err)
+		} else {
+			cancelCount++
+			mm.mu.Lock()
+			delete(mm.activeOrders, order.OrderID)
+			if mm.ordersByInstrument[order.Instrument] != nil {
+				delete(mm.ordersByInstrument[order.Instrument], order.Side)
+			}
+			mm.mu.Unlock()
+		}
+	}
+	log.Printf("Cancelled %d orders on startup", cancelCount)
+	
 	// Subscribe to ticker updates
 	tickerChan, err := mm.exchange.SubscribeTickers(mm.ctx, mm.config.Instruments)
 	if err != nil {
@@ -219,13 +244,13 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 		defer lock.Unlock()
 	}
 	
-	// Check if we recently updated this instrument (within 100ms)
+	// Check if we recently updated this instrument (within 2 seconds to avoid rate limits)
 	mm.mu.RLock()
 	lastUpdate, exists := mm.lastUpdateTime[instrument]
 	mm.mu.RUnlock()
 	
-	if exists && time.Since(lastUpdate) < 100*time.Millisecond {
-		// Skip this update to prevent duplicates
+	if exists && time.Since(lastUpdate) < 2*time.Second {
+		// Skip this update to prevent rate limiting
 		return nil
 	}
 	
@@ -239,6 +264,12 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 	
 	if !exists || ticker == nil {
 		return fmt.Errorf("no ticker data for %s", instrument)
+	}
+	
+	// Skip if we don't have valid price data yet
+	if ticker.BestBid.IsZero() && ticker.BestAsk.IsZero() && ticker.MarkPrice.IsZero() {
+		log.Printf("No valid price data for %s yet (BestBid=0, BestAsk=0, MarkPrice=0), skipping quote update", instrument)
+		return nil
 	}
 	
 	// Fetch orderbook if reference size is configured
@@ -483,12 +514,38 @@ func (mm *MarketMaker) updateQuotesForInstrument(instrument string) error {
 
 // calculateQuotes calculates bid and ask prices based on current market
 func (mm *MarketMaker) calculateQuotes(ticker *TickerUpdate, orderBook *MarketMakerOrderBook) (bidPrice, askPrice decimal.Decimal) {
-	// Calculate mid price
-	midPrice := ticker.BestBid.Add(ticker.BestAsk).Div(decimal.NewFromInt(2))
+	// Calculate mid price - use mark price as fallback if orderbook is empty
+	var midPrice decimal.Decimal
+	if ticker.BestBid.IsZero() || ticker.BestAsk.IsZero() {
+		// Use mark price if available, otherwise use a default
+		if !ticker.MarkPrice.IsZero() {
+			midPrice = ticker.MarkPrice
+		} else {
+			// This should rarely happen - log it
+			log.Printf("WARNING: No valid price data for %s (BestBid=%s, BestAsk=%s, MarkPrice=%s)", 
+				ticker.Instrument, ticker.BestBid.String(), ticker.BestAsk.String(), ticker.MarkPrice.String())
+			// Use a reasonable default for options (e.g., $1)
+			midPrice = decimal.NewFromFloat(1.0)
+		}
+	} else {
+		midPrice = ticker.BestBid.Add(ticker.BestAsk).Div(decimal.NewFromInt(2))
+	}
 	
 	// Determine reference prices based on orderbook or ticker
 	referenceBid := ticker.BestBid
 	referenceAsk := ticker.BestAsk
+	
+	// If best bid/ask are zero, create synthetic prices from mid price
+	if referenceBid.IsZero() || referenceAsk.IsZero() {
+		// Use configured spread to create synthetic bid/ask
+		spreadAmount := midPrice.Mul(decimal.NewFromInt(int64(mm.config.SpreadBps)).Div(decimal.NewFromInt(10000)))
+		if referenceBid.IsZero() {
+			referenceBid = midPrice.Sub(spreadAmount.Div(decimal.NewFromInt(2)))
+		}
+		if referenceAsk.IsZero() {
+			referenceAsk = midPrice.Add(spreadAmount.Div(decimal.NewFromInt(2)))
+		}
+	}
 	
 	// If we have orderbook data and reference size is set, find the best bid/ask that meets size requirement
 	if orderBook != nil && mm.config.ImprovementReferenceSize.GreaterThan(decimal.Zero) {

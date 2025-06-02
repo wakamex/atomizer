@@ -605,13 +605,34 @@ func (d *DeriveMarketMakerExchange) ReplaceOrder(orderID string, instrument stri
 
 // CancelOrder cancels an order on Derive
 func (d *DeriveMarketMakerExchange) CancelOrder(orderID string) error {
+	// First, we need to find the instrument name for this order
+	orders, err := d.GetOpenOrders()
+	if err != nil {
+		return fmt.Errorf("failed to get open orders: %w", err)
+	}
+	
+	var instrumentName string
+	for _, order := range orders {
+		if order.OrderID == orderID {
+			instrumentName = order.Instrument
+			break
+		}
+	}
+	
+	if instrumentName == "" {
+		// Order not found in open orders, might already be cancelled
+		return nil
+	}
+	
 	id := fmt.Sprintf("%d", time.Now().UnixMilli())
 	
 	req := map[string]interface{}{
 		"jsonrpc": "2.0",
-		"method":  "private/cancel_order",
+		"method":  "private/cancel",
 		"params": map[string]interface{}{
 			"order_id": orderID,
+			"subaccount_id": d.subaccountID,
+			"instrument_name": instrumentName,
 		},
 		"id": id,
 	}

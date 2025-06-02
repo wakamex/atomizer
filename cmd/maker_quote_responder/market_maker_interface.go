@@ -118,7 +118,7 @@ func DefaultMarketMakerConfig() *MarketMakerConfig {
 		ExchangeTestMode: false,
 		SpreadBps:        10, // 0.1%
 		QuoteSize:        decimal.NewFromFloat(1),
-		RefreshInterval:  1 * time.Second,
+		RefreshInterval:  3 * time.Second,
 		MaxPositionSize:  decimal.NewFromFloat(10),
 		MaxTotalExposure: decimal.NewFromFloat(100),
 		CancelThreshold:  decimal.NewFromFloat(0.005), // 0.5% price movement

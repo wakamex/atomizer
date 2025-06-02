@@ -25,6 +25,17 @@ type DeriveWSClient struct {
 	orderbooks   map[string]*OrderBookData
 	orderbookMu  sync.RWMutex
 	orderbookSubs map[string]bool
+	
+	// Connection state management
+	isConnected     bool
+	lastActivity    time.Time
+	reconnectChan   chan struct{}
+	shutdownChan    chan struct{}
+	wsURL           string
+	reconnectDelay  time.Duration
+	maxReconnectDelay time.Duration
+	pingTicker      *time.Ticker
+	heartbeatChan   chan struct{}
 }
 
 // OrderBookData represents orderbook state
@@ -48,22 +59,58 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 		requests:     make(map[string]chan json.RawMessage),
 		orderbooks:   make(map[string]*OrderBookData),
 		orderbookSubs: make(map[string]bool),
+		wsURL:        "wss://api.lyra.finance/ws",
+		reconnectDelay: 1 * time.Second,
+		maxReconnectDelay: 30 * time.Second,
+		reconnectChan: make(chan struct{}, 1),
+		shutdownChan:  make(chan struct{}),
+		heartbeatChan: make(chan struct{}, 1),
 	}
 
-	// Connect to Derive WebSocket
-	wsURL := "wss://api.lyra.finance/ws"
-	log.Printf("[Derive WS] Connecting to %s", wsURL)
-	debugLog("[Derive WS] Connecting to %s", wsURL)
-	
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Derive WebSocket: %w", err)
+	// Establish initial connection
+	if err := client.connect(); err != nil {
+		return nil, fmt.Errorf("failed to establish initial connection: %w", err)
 	}
-	client.conn = conn
 	
-	// Set up ping/pong handlers with label
+	// Start connection monitor
+	go client.connectionMonitor()
+	
+	// Start heartbeat to keep connection alive
+	go client.heartbeat()
+
+	return client, nil
+}
+
+// connect establishes WebSocket connection and performs login
+func (c *DeriveWSClient) connect() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	// Close existing connection if any
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+	
+	log.Printf("[Derive WS] Connecting to %s", c.wsURL)
+	debugLog("[Derive WS] Connecting to %s", c.wsURL)
+	
+	// Set connection timeout
+	dialer := websocket.DefaultDialer
+	dialer.HandshakeTimeout = 10 * time.Second
+	
+	conn, _, err := dialer.Dial(c.wsURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Derive WebSocket: %w", err)
+	}
+	
+	c.conn = conn
+	c.lastActivity = time.Now()
+	
+	// Set up ping/pong handlers
 	conn.SetPingHandler(func(appData string) error {
 		debugLog("[Derive WS] Ping received, sending Pong")
+		c.updateActivity()
 		err := conn.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(5*time.Second))
 		if err != nil {
 			debugLog("[Derive WS] Error sending pong: %v", err)
@@ -73,50 +120,188 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 	
 	conn.SetPongHandler(func(appData string) error {
 		debugLog("[Derive WS] Pong received")
+		c.updateActivity()
 		return nil
 	})
-
+	
+	// Set read deadline for initial messages
+	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	
 	// Start message handler
-	go client.handleMessages()
-
+	go c.handleMessages()
+	
+	// Unlock mutex temporarily for login (which needs to send/receive messages)
+	c.mu.Unlock()
+	
 	// Login
-	if err := client.login(); err != nil {
+	if err := c.login(); err != nil {
+		c.mu.Lock()
 		conn.Close()
-		return nil, fmt.Errorf("failed to login: %w", err)
+		c.conn = nil
+		c.isConnected = false
+		return fmt.Errorf("failed to login: %w", err)
 	}
 	
-	// Start heartbeat to keep connection alive
-	go client.heartbeat()
+	c.mu.Lock()
+	c.isConnected = true
+	
+	// Clear read deadline after successful login
+	c.conn.SetReadDeadline(time.Time{})
+	
+	// Resubscribe to orderbooks
+	c.resubscribeOrderbooks()
+	
+	log.Printf("[Derive WS] Successfully connected and authenticated")
+	
+	return nil
+}
 
-	return client, nil
+// updateActivity updates the last activity timestamp
+func (c *DeriveWSClient) updateActivity() {
+	c.mu.Lock()
+	c.lastActivity = time.Now()
+	c.mu.Unlock()
+}
+
+// connectionMonitor monitors connection health and triggers reconnection when needed
+func (c *DeriveWSClient) connectionMonitor() {
+	for {
+		select {
+		case <-c.reconnectChan:
+			log.Printf("[Derive WS] Reconnection requested")
+			c.performReconnection()
+			
+		case <-c.shutdownChan:
+			log.Printf("[Derive WS] Connection monitor shutting down")
+			return
+		}
+	}
+}
+
+// performReconnection handles the reconnection logic with exponential backoff
+func (c *DeriveWSClient) performReconnection() {
+	c.mu.Lock()
+	c.isConnected = false
+	delay := c.reconnectDelay
+	c.mu.Unlock()
+	
+	for {
+		select {
+		case <-c.shutdownChan:
+			return
+		default:
+		}
+		
+		log.Printf("[Derive WS] Attempting reconnection in %v", delay)
+		time.Sleep(delay)
+		
+		if err := c.connect(); err != nil {
+			log.Printf("[Derive WS] Reconnection failed: %v", err)
+			
+			// Exponential backoff
+			delay = delay * 2
+			if delay > c.maxReconnectDelay {
+				delay = c.maxReconnectDelay
+			}
+		} else {
+			// Reset delay on successful reconnection
+			c.mu.Lock()
+			c.reconnectDelay = 1 * time.Second
+			c.mu.Unlock()
+			return
+		}
+	}
+}
+
+// triggerReconnection triggers a reconnection attempt
+func (c *DeriveWSClient) triggerReconnection() {
+	select {
+	case c.reconnectChan <- struct{}{}:
+		debugLog("[Derive WS] Reconnection triggered")
+	default:
+		// Channel is full, reconnection already scheduled
+	}
+}
+
+// resubscribeOrderbooks re-subscribes to all previously subscribed orderbooks
+func (c *DeriveWSClient) resubscribeOrderbooks() {
+	c.orderbookMu.RLock()
+	channels := make([]string, 0, len(c.orderbookSubs))
+	for channel := range c.orderbookSubs {
+		channels = append(channels, channel)
+	}
+	c.orderbookMu.RUnlock()
+	
+	if len(channels) > 0 {
+		msg := map[string]interface{}{
+			"jsonrpc": "2.0",
+			"method":  "subscribe",
+			"params": map[string]interface{}{
+				"channels": channels,
+			},
+			"id": fmt.Sprintf("resubscribe_%d", time.Now().UnixNano()),
+		}
+		
+		if err := c.conn.WriteJSON(msg); err != nil {
+			log.Printf("[Derive WS] Failed to resubscribe to orderbooks: %v", err)
+		} else {
+			log.Printf("[Derive WS] Resubscribed to %d orderbook channels", len(channels))
+		}
+	}
 }
 
 // heartbeat sends periodic pings to keep the connection alive
 func (c *DeriveWSClient) heartbeat() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+	c.pingTicker = time.NewTicker(15 * time.Second)
+	defer c.pingTicker.Stop()
+	
+	activityCheckTicker := time.NewTicker(45 * time.Second)
+	defer activityCheckTicker.Stop()
 	
 	for {
 		select {
-		case <-ticker.C:
+		case <-c.shutdownChan:
+			return
+			
+		case <-c.pingTicker.C:
 			c.mu.Lock()
-			if c.conn == nil {
+			if c.conn == nil || !c.isConnected {
 				c.mu.Unlock()
-				return
+				continue
 			}
 			
 			// Send ping
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				debugLog("[Derive WS] Error sending ping: %v", err)
+				log.Printf("[Derive WS] Error sending ping: %v", err)
+				c.isConnected = false
 				c.mu.Unlock()
-				return
+				c.triggerReconnection()
+				continue
 			}
 			c.mu.Unlock()
+			debugLog("[Derive WS] Ping sent")
 			
-		case <-time.After(60 * time.Second):
-			// If we haven't received anything in 60 seconds, consider the connection dead
-			debugLog("[Derive WS] No activity for 60 seconds, connection may be dead")
-			return
+		case <-activityCheckTicker.C:
+			// Check for connection health based on last activity
+			c.mu.Lock()
+			if c.isConnected && time.Since(c.lastActivity) > 90*time.Second {
+				log.Printf("[Derive WS] No activity for %v, connection may be dead", time.Since(c.lastActivity))
+				c.isConnected = false
+				c.mu.Unlock()
+				c.triggerReconnection()
+			} else {
+				c.mu.Unlock()
+			}
+			
+		case <-c.heartbeatChan:
+			// External trigger to check connection
+			c.mu.Lock()
+			if !c.isConnected {
+				c.mu.Unlock()
+				c.triggerReconnection()
+			} else {
+				c.mu.Unlock()
+			}
 		}
 	}
 }
@@ -189,16 +374,47 @@ func (c *DeriveWSClient) login() error {
 
 // handleMessages processes incoming WebSocket messages
 func (c *DeriveWSClient) handleMessages() {
+	defer func() {
+		// Trigger reconnection when message handler exits
+		c.mu.Lock()
+		c.isConnected = false
+		c.mu.Unlock()
+		c.triggerReconnection()
+	}()
+	
 	for {
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			debugLog("[Derive WS] Read error: %v", err)
+		c.mu.Lock()
+		if c.conn == nil {
+			c.mu.Unlock()
 			return
 		}
+		conn := c.conn
+		c.mu.Unlock()
+		
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("[Derive WS] Unexpected close error: %v", err)
+			} else {
+				debugLog("[Derive WS] Read error: %v", err)
+			}
+			return
+		}
+		
+		// Update activity timestamp
+		c.updateActivity()
 		
 		// Log raw message for debugging
 		if len(message) == 0 {
 			log.Printf("[Derive WS] WARNING: Received empty message from WebSocket")
+			// Empty messages might indicate connection issues
+			c.mu.Lock()
+			if time.Since(c.lastActivity) > 60*time.Second {
+				c.isConnected = false
+				c.mu.Unlock()
+				return
+			}
+			c.mu.Unlock()
 			continue
 		} else if len(message) < 500 {
 			debugLog("[Derive WS] Raw message: %s", string(message))
@@ -321,17 +537,43 @@ func (c *DeriveWSClient) sendRequest(req map[string]interface{}) <-chan json.Raw
 	respChan := make(chan json.RawMessage, 1)
 	
 	id, _ := req["id"].(string)
+	
 	c.mu.Lock()
+	// Allow login requests to go through even if not yet connected
+	method, _ := req["method"].(string)
+	if method != "public/login" && (!c.isConnected || c.conn == nil) {
+		c.mu.Unlock()
+		log.Printf("[Derive WS] Cannot send request: connection not available")
+		close(respChan)
+		// Trigger reconnection
+		c.triggerReconnection()
+		return respChan
+	}
+	
+	// For login requests, just check if conn is available
+	if c.conn == nil {
+		c.mu.Unlock()
+		log.Printf("[Derive WS] Cannot send request: no connection")
+		close(respChan)
+		return respChan
+	}
+	
 	c.requests[id] = respChan
+	conn := c.conn
 	c.mu.Unlock()
 
 	// Marshal to JSON to log exact format
 	jsonBytes, _ := json.Marshal(req)
 	debugLog("[Derive WS] Sending JSON: %s", string(jsonBytes))
 	
-	if err := c.conn.WriteJSON(req); err != nil {
-		debugLog("[Derive WS] Failed to send request: %v", err)
+	if err := conn.WriteJSON(req); err != nil {
+		log.Printf("[Derive WS] Failed to send request: %v", err)
+		c.mu.Lock()
+		delete(c.requests, id)
+		c.isConnected = false
+		c.mu.Unlock()
 		close(respChan)
+		c.triggerReconnection()
 		return respChan
 	}
 
@@ -520,9 +762,12 @@ func (c *DeriveWSClient) GetWallet() string {
 // GetPositions fetches all positions for the subaccount
 func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interface{}, error) {
 	// Check if WebSocket is still connected
-	if c.conn == nil {
-		return nil, fmt.Errorf("WebSocket connection is nil")
+	c.mu.Lock()
+	if !c.isConnected || c.conn == nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("WebSocket connection not available")
 	}
+	c.mu.Unlock()
 	
 	id := fmt.Sprintf("%d", time.Now().UnixMilli())
 	
@@ -584,7 +829,33 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 
 // Close closes the WebSocket connection
 func (c *DeriveWSClient) Close() error {
-	return c.conn.Close()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	// Signal shutdown to all goroutines
+	close(c.shutdownChan)
+	
+	c.isConnected = false
+	if c.conn != nil {
+		err := c.conn.Close()
+		c.conn = nil
+		return err
+	}
+	return nil
+}
+
+// IsConnected returns the connection status
+func (c *DeriveWSClient) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.isConnected
+}
+
+// GetConnectionInfo returns connection status information
+func (c *DeriveWSClient) GetConnectionInfo() (bool, time.Time, time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.isConnected, c.lastActivity, time.Since(c.lastActivity)
 }
 
 // SubscribeOrderBook subscribes to orderbook updates for an instrument
@@ -619,6 +890,13 @@ func (c *DeriveWSClient) SubscribeOrderBook(instrument string, depth int) error 
 	}
 	
 	c.mu.Lock()
+	if !c.isConnected || c.conn == nil {
+		c.mu.Unlock()
+		c.orderbookMu.Lock()
+		delete(c.orderbookSubs, channel)
+		c.orderbookMu.Unlock()
+		return fmt.Errorf("cannot subscribe: connection not available")
+	}
 	err := c.conn.WriteJSON(msg)
 	c.mu.Unlock()
 	
