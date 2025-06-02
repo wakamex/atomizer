@@ -600,41 +600,62 @@ func (mm *MarketMaker) calculateQuotes(ticker *TickerUpdate, orderBook *MarketMa
 	return bidPrice, askPrice
 }
 
-// placeQuotes places bid and ask orders (respecting one-sided flags)
+// placeQuotes places bid and ask orders concurrently (respecting one-sided flags)
 func (mm *MarketMaker) placeQuotes(instrument string, bidPrice, askPrice decimal.Decimal) error {
 	var bidOrderID, askOrderID string
-	var err error
+	var bidErr, askErr error
 	ordersPlaced := 0
+	
+	// Use goroutines to place orders concurrently
+	var wg sync.WaitGroup
 	
 	// Place bid order if not ask-only
 	if !mm.config.AskOnly {
-		bidOrderID, err = mm.exchange.PlaceLimitOrder(instrument, "buy", bidPrice, mm.config.QuoteSize)
-		if err != nil {
-			return fmt.Errorf("failed to place bid order: %w", err)
-		}
-		ordersPlaced++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			bidOrderID, bidErr = mm.exchange.PlaceLimitOrder(instrument, "buy", bidPrice, mm.config.QuoteSize)
+		}()
 	}
 	
 	// Place ask order if not bid-only
 	if !mm.config.BidOnly {
-		askOrderID, err = mm.exchange.PlaceLimitOrder(instrument, "sell", askPrice, mm.config.QuoteSize)
-		if err != nil {
-			// Cancel the bid order if we placed one but couldn't place the ask
-			if bidOrderID != "" {
-				mm.exchange.CancelOrder(bidOrderID)
-			}
-			return fmt.Errorf("failed to place ask order: %w", err)
-		}
-		ordersPlaced++
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			askOrderID, askErr = mm.exchange.PlaceLimitOrder(instrument, "sell", askPrice, mm.config.QuoteSize)
+		}()
 	}
 	
-	// Track orders
-	mm.mu.Lock()
-	if bidOrderID != "" {
-		mm.trackOrder(bidOrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
+	// Wait for both orders to complete
+	wg.Wait()
+	
+	// Handle errors - if one failed, cancel the other
+	if bidErr != nil && askErr != nil {
+		return fmt.Errorf("failed to place both orders: bid error: %w, ask error: %v", bidErr, askErr)
 	}
-	if askOrderID != "" {
+	
+	if bidErr != nil && askOrderID != "" {
+		// Bid failed but ask succeeded, cancel ask
+		mm.exchange.CancelOrder(askOrderID)
+		return fmt.Errorf("failed to place bid order (cancelled ask): %w", bidErr)
+	}
+	
+	if askErr != nil && bidOrderID != "" {
+		// Ask failed but bid succeeded, cancel bid
+		mm.exchange.CancelOrder(bidOrderID)
+		return fmt.Errorf("failed to place ask order (cancelled bid): %w", askErr)
+	}
+	
+	// Track successfully placed orders
+	mm.mu.Lock()
+	if bidOrderID != "" && bidErr == nil {
+		mm.trackOrder(bidOrderID, instrument, "buy", bidPrice, mm.config.QuoteSize)
+		ordersPlaced++
+	}
+	if askOrderID != "" && askErr == nil {
 		mm.trackOrder(askOrderID, instrument, "sell", askPrice, mm.config.QuoteSize)
+		ordersPlaced++
 	}
 	mm.stats.OrdersPlaced += int64(ordersPlaced)
 	mm.mu.Unlock()

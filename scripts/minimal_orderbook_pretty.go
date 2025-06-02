@@ -15,7 +15,7 @@ func main() {
     conn.WriteJSON(map[string]interface{}{
         "method": "subscribe",
         "params": map[string]interface{}{
-            "channels": []string{"orderbook.ETH-20250603-2600-C.1.10"},
+            "channels": []string{"orderbook.ETH-20250604-2600-C.1.10"},
         },
     })
     
