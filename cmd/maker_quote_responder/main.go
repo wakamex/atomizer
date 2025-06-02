@@ -92,6 +92,13 @@ func main() {
 		os.Exit(0)
 	}
 	
+	// Check for manual-order subcommand
+	if len(os.Args) > 1 && os.Args[1] == "manual-order" {
+		log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+		RunManualOrder()
+		os.Exit(0)
+	}
+	
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	
 	// Print build hash as first output

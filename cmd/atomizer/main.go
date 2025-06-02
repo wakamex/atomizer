@@ -15,6 +15,7 @@ var commands = map[string]struct {
 }{
 	"rfq":            {"maker_quote_responder", "Run RFQ responder for automated quoting"},
 	"market-maker":   {"maker_quote_responder", "Run market maker with continuous quoting"},
+	"manual-order":   {"maker_quote_responder", "Place a manual order on Derive exchange"},
 	"analyze":        {"analyze_options", "Analyze options market liquidity and pricing"},
 	"inventory":      {"inventory", "Show current positions and P&L"},
 	"markets":        {"markets", "Display available markets and instruments"},
@@ -71,12 +72,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Special handling for market-maker command
+	// Special handling for market-maker and manual-order commands
 	args := os.Args[2:]
 	if cmdName == "market-maker" {
 		// The maker_quote_responder binary expects "market-maker" as the first argument
 		// followed by the actual market maker flags
 		args = append([]string{"market-maker"}, args...)
+	} else if cmdName == "manual-order" {
+		// The maker_quote_responder binary expects "manual-order" as the first argument
+		args = append([]string{"manual-order"}, args...)
 	}
 
 	// Execute the binary
@@ -103,7 +107,7 @@ func showHelp() {
 	fmt.Println("Available commands:")
 	
 	// Print commands in a consistent order
-	cmds := []string{"rfq", "market-maker", "analyze", "inventory", "markets", "send-quote", "market-monitor"}
+	cmds := []string{"rfq", "market-maker", "manual-order", "analyze", "inventory", "markets", "send-quote", "market-monitor"}
 	for _, cmd := range cmds {
 		info := commands[cmd]
 		fmt.Printf("  %-13s %s\n", cmd, info.description)
@@ -198,6 +202,29 @@ func showCommandHelp(command string) {
 		fmt.Println("Options:")
 		fmt.Println("  -e, --exchange NAME     Exchange to use")
 		fmt.Println("  --type TYPE             Order type (limit, market)")
+		
+	case "manual-order":
+		fmt.Println("Usage: atomizer manual-order")
+		fmt.Println()
+		fmt.Println("Places a manual order on Derive exchange.")
+		fmt.Println()
+		fmt.Println("Required Environment Variables:")
+		fmt.Println("  DERIVE_PRIVATE_KEY      Your private key")
+		fmt.Println("  DERIVE_WALLET_ADDRESS   Your Derive wallet address")
+		fmt.Println()
+		fmt.Println("Optional Environment Variables:")
+		fmt.Println("  ORDER_INSTRUMENT        Instrument to trade (default: ETH-PERP)")
+		fmt.Println("  ORDER_SIDE              Order side: buy/sell (default: buy)")
+		fmt.Println("  ORDER_PRICE             Order price (default: 2000)")
+		fmt.Println("  ORDER_AMOUNT            Order amount (default: 0.1)")
+		fmt.Println("  DERIVE_SUBACCOUNT_ID    Subaccount ID (default: auto)")
+		fmt.Println()
+		fmt.Println("Examples:")
+		fmt.Println("  # Place default order (buy 0.1 ETH-PERP @ $2000)")
+		fmt.Println("  atomizer manual-order")
+		fmt.Println()
+		fmt.Println("  # Place custom order")
+		fmt.Println("  ORDER_INSTRUMENT=BTC-PERP ORDER_SIDE=sell ORDER_PRICE=45000 ORDER_AMOUNT=0.5 atomizer manual-order")
 		
 	case "market-monitor":
 		fmt.Println("Usage: atomizer market-monitor [subcommand] [options]")
