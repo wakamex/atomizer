@@ -25,7 +25,9 @@ jobs:
     - name: Run tests with coverage
       run: |
         cd cmd/maker_quote_responder
-        go test -coverprofile=coverage.txt -covermode=atomic ./...
+        # Run tests only in the main package
+        # This excludes cmd/test_derive and test/ which are manual testing tools
+        go test -coverprofile=coverage.txt -covermode=atomic .
         
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
