@@ -2,22 +2,9 @@ package main
 
 import (
 	"math/big"
-	"time"
 
 	"github.com/shopspring/decimal"
 )
-
-// ArbitrageConfig holds configuration for the arbitrage system
-type ArbitrageConfig struct {
-	MaxPositionDelta     float64
-	MinLiquidityScore    float64
-	MaxConcurrentTrades  int
-	HedgeRetryAttempts   int
-	HedgeRetryDelay      time.Duration
-	EnableGammaHedging   bool
-	GammaThreshold       float64
-	RiskCheckInterval    time.Duration
-}
 
 // DecimalFromBigInt converts a big.Int with given exponent to decimal
 func DecimalFromBigInt(value *big.Int, exp int32) decimal.Decimal {

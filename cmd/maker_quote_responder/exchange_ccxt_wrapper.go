@@ -483,12 +483,16 @@ func (d *CCXTDeriveExchange) PlaceOrder(conf RFQConfirmation, instrument string,
 	}
 	
 	log.Printf("[Hedge] ✅ Order placed successfully on Derive")
-	log.Printf("[Hedge] Order ID: %s", order.Id)
+	if order.Id != nil {
+		log.Printf("[Hedge] Order ID: %s", *order.Id)
+	}
 	log.Printf("[Hedge] Symbol: %s", symbol)
 	log.Printf("[Hedge] Side: %s", strings.ToUpper(orderSide))
 	log.Printf("[Hedge] Quantity: %f", quantity)
 	log.Printf("[Hedge] Price: %f USDC", hedgePrice)
-	log.Printf("[Hedge] Status: %s", order.Status)
+	if order.Status != nil {
+		log.Printf("[Hedge] Status: %s", *order.Status)
+	}
 	
 	return nil
 }

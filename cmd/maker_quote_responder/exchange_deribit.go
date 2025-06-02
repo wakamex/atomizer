@@ -169,8 +169,12 @@ func (d *DeribitExchange) PlaceOrder(conf RFQConfirmation, instrument string, cf
 		return fmt.Errorf("failed to place hedge order: %w", err)
 	}
 
+	orderIdStr := ""
+	if order.Id != nil {
+		orderIdStr = *order.Id
+	}
 	log.Printf("[Hedge] Order placed successfully - ID: %s, Side: %s, Quantity: %f ETH, Price: %f",
-		order.Id, orderSide, quantityETH, hedgePrice)
+		orderIdStr, orderSide, quantityETH, hedgePrice)
 
 	return nil
 }

@@ -76,7 +76,7 @@ func NewDeribitClient(clientID string, privateKeyPEM string, testnet bool) (*Der
 		ClientID:   clientID,
 		PrivateKey: ed25519Key,
 		BaseURL:    baseURL,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: newHTTPClient(),
 	}
 
 	// Authenticate immediately

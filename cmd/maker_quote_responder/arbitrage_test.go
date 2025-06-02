@@ -12,8 +12,7 @@ import (
 func TestArbitrageOrchestrator(t *testing.T) {
 	// Create test config
 	cfg := &AppConfig{
-		MaxPositionSize:  "100",
-		MaxDeltaExposure: "50",
+		MaxPositionDelta: 100,
 		ExchangeName:     "test",
 	}
 
@@ -52,10 +51,10 @@ func TestArbitrageOrchestrator(t *testing.T) {
 	t.Run("RFQTradeSubmission", func(t *testing.T) {
 		rfq := RFQResult{
 			ID:         "test-rfq-123",
-			Strike:     NewBigInt(3000, 8),
-			Expiry:     NewBigInt(time.Now().Add(30*24*time.Hour).Unix(), 0),
+			Strike:     NewBigInt(3000, 8).String(),
+			Expiry:     time.Now().Add(30*24*time.Hour).Unix(),
 			IsPut:      false,
-			Quantity:   NewBigInt(1, 18), // 1 ETH in wei
+			Quantity:   NewBigInt(1, 18).String(), // 1 ETH in wei
 			IsTakerBuy: true,
 		}
 
@@ -72,8 +71,7 @@ func TestArbitrageOrchestrator(t *testing.T) {
 
 func TestRiskManager(t *testing.T) {
 	cfg := &AppConfig{
-		MaxPositionSize:  "10",
-		MaxDeltaExposure: "5",
+		MaxPositionDelta: 10,
 	}
 
 	riskManager := NewRiskManager(cfg)
