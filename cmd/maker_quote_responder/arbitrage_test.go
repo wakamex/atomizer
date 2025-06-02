@@ -92,7 +92,7 @@ func TestRiskManager(t *testing.T) {
 	t.Run("ValidateTradeExceedsLimits", func(t *testing.T) {
 		trade := &TradeEvent{
 			Instrument: "ETH-20231225-3000-C",
-			Quantity:   decimal.NewFromFloat(15), // Exceeds max position size of 10
+			Quantity:   decimal.NewFromFloat(1500), // Exceeds max position size of 1000
 			IsTakerBuy: false,
 		}
 

@@ -25,7 +25,7 @@ func TestDeribitOptionPricing(t *testing.T) {
 	}{
 		{
 			name:       "ETH Call Option",
-			instrument: "ETH-30MAY25-3000-C",
+			instrument: "ETH-27MAR26-3000-C",
 			wantError:  false,
 		},
 		{
@@ -133,6 +133,11 @@ func TestManualDeribitAPI(t *testing.T) {
 
 func TestMakeQuote(t *testing.T) {
 	mockExchange := &MockExchange{}
+	cfg := &AppConfig{
+		MakerAddress:              "0x1234567890123456789012345678901234567890",
+		PrivateKey:                "0000000000000000000000000000000000000000000000000000000000000001",
+		QuoteValidDurationSeconds: 300,
+	}
 	a, err := MakeQuote(RFQResult{
 		Asset:      "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f",
 		Strike:     "260000000000",
@@ -140,13 +145,15 @@ func TestMakeQuote(t *testing.T) {
 		IsPut:      false,
 		Quantity:   "1000000000000000000",
 		IsTakerBuy: false,
-	}, "ETH", "test-nonce", &AppConfig{}, mockExchange)
+		ChainID:    1,
+	}, "ETH", "test-nonce", cfg, mockExchange)
 	assert.NoError(t, err)
-	assert.Equal(t, a.Strike, "260000000000")
-	assert.Equal(t, a.Expiry, time.Date(2025, 6, 28, 0, 0, 0, 0, time.UTC).Unix())
-	assert.Equal(t, a.IsPut, false)
-	assert.Equal(t, a.Quantity, "1000000000000000000")
-	assert.Equal(t, a.IsTakerBuy, false)
-	assert.Equal(t, a.AssetAddress, "0x0000000000000000000000000000000000000000")
-	assert.Equal(t, a.ChainID, uint64(1))
+	assert.Equal(t, "260000000000", a.Strike)
+	assert.Equal(t, time.Date(2025, 6, 28, 0, 0, 0, 0, time.UTC).Unix(), a.Expiry)
+	assert.Equal(t, false, a.IsPut)
+	assert.Equal(t, "1000000000000000000", a.Quantity)
+	assert.Equal(t, false, a.IsTakerBuy)
+	assert.Equal(t, "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f", a.AssetAddress)
+	assert.Equal(t, 1, a.ChainID)
+	assert.Equal(t, cfg.MakerAddress, a.Maker)
 }
