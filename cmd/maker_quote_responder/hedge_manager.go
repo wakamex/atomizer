@@ -85,7 +85,7 @@ func (hm *HedgeManager) ExecuteHedge(trade *TradeEvent) (*HedgeResult, error) {
 func (hm *HedgeManager) buildHedgeParams(trade *TradeEvent) (*hedgeParams, error) {
 	// For Rysk trades, we're the maker
 	// If taker buys from us, we sell to them, so we need to buy on exchange to hedge
-	hedgeDirection := !trade.IsTakerBuy
+	hedgeDirection := trade.IsTakerBuy
 	
 	// Convert instrument name for exchange
 	instrument, err := hm.convertInstrumentName(trade)
