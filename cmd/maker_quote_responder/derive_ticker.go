@@ -163,8 +163,7 @@ func FetchDeriveTicker(instrumentName string) (*DeriveTicker, error) {
 	req.Header.Set("accept", "application/json")
 	req.Header.Set("content-type", "application/json")
 	
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := newHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch ticker: %w", err)
 	}

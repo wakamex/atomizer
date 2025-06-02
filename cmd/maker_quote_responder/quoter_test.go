@@ -132,14 +132,15 @@ func TestManualDeribitAPI(t *testing.T) {
 }
 
 func TestMakeQuote(t *testing.T) {
+	mockExchange := &MockExchange{}
 	a, err := MakeQuote(RFQResult{
-		Asset:      "ETH",
+		Asset:      "0xb67bfa7b488df4f2efa874f4e59242e9130ae61f",
 		Strike:     "260000000000",
 		Expiry:     time.Date(2025, 6, 28, 0, 0, 0, 0, time.UTC).Unix(),
 		IsPut:      false,
 		Quantity:   "1000000000000000000",
 		IsTakerBuy: false,
-	}, "ETH", "test-nonce", &AppConfig{})
+	}, "ETH", "test-nonce", &AppConfig{}, mockExchange)
 	assert.NoError(t, err)
 	assert.Equal(t, a.Strike, "260000000000")
 	assert.Equal(t, a.Expiry, time.Date(2025, 6, 28, 0, 0, 0, 0, time.UTC).Unix())

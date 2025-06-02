@@ -41,8 +41,11 @@ func TestFinalIntegration(t *testing.T) {
 		}
 		t.Logf("Asset %s mapped to underlying: %s", rfq.Asset, underlying)
 
-		// Make quote using Deribit
-		quote, err := MakeQuote(rfq, underlying, "test-rfq-123", cfg)
+		// Create a mock exchange for testing
+		mockExchange := &MockExchange{}
+		
+		// Make quote using mock exchange
+		quote, err := MakeQuote(rfq, underlying, "test-rfq-123", cfg, mockExchange)
 		if err != nil {
 			t.Logf("MakeQuote failed: %v", err)
 			t.Log("This is expected if the exact option doesn't exist on Deribit")
