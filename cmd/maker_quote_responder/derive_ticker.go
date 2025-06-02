@@ -21,6 +21,19 @@ type DeriveTicker struct {
 		Strike string `json:"strike"`
 		OptionType string `json:"option_type"`
 	} `json:"option_details"`
+	OptionPricing   *struct {
+		AskIV          string `json:"ask_iv"`
+		BidIV          string `json:"bid_iv"`
+		Delta          string `json:"delta"`
+		DiscountFactor string `json:"discount_factor"`
+		ForwardPrice   string `json:"forward_price"`
+		Gamma          string `json:"gamma"`
+		IV             string `json:"iv"`
+		MarkPrice      string `json:"mark_price"`
+		Rho            string `json:"rho"`
+		Theta          string `json:"theta"`
+		Vega           string `json:"vega"`
+	} `json:"option_pricing"`
 }
 
 // GetBidPrice returns bid price as float64
@@ -61,6 +74,66 @@ func (t *DeriveTicker) GetAskSize() float64 {
 func (t *DeriveTicker) GetIndexPrice() float64 {
 	var f float64
 	fmt.Sscanf(t.IndexPrice, "%f", &f)
+	return f
+}
+
+// GetDelta returns delta as float64 (0 if not available)
+func (t *DeriveTicker) GetDelta() float64 {
+	if t.OptionPricing == nil {
+		return 0
+	}
+	var f float64
+	fmt.Sscanf(t.OptionPricing.Delta, "%f", &f)
+	return f
+}
+
+// GetGamma returns gamma as float64 (0 if not available)
+func (t *DeriveTicker) GetGamma() float64 {
+	if t.OptionPricing == nil {
+		return 0
+	}
+	var f float64
+	fmt.Sscanf(t.OptionPricing.Gamma, "%f", &f)
+	return f
+}
+
+// GetVega returns vega as float64 (0 if not available)
+func (t *DeriveTicker) GetVega() float64 {
+	if t.OptionPricing == nil {
+		return 0
+	}
+	var f float64
+	fmt.Sscanf(t.OptionPricing.Vega, "%f", &f)
+	return f
+}
+
+// GetTheta returns theta as float64 (0 if not available)
+func (t *DeriveTicker) GetTheta() float64 {
+	if t.OptionPricing == nil {
+		return 0
+	}
+	var f float64
+	fmt.Sscanf(t.OptionPricing.Theta, "%f", &f)
+	return f
+}
+
+// GetRho returns rho as float64 (0 if not available)
+func (t *DeriveTicker) GetRho() float64 {
+	if t.OptionPricing == nil {
+		return 0
+	}
+	var f float64
+	fmt.Sscanf(t.OptionPricing.Rho, "%f", &f)
+	return f
+}
+
+// GetIV returns implied volatility as float64 (0 if not available)
+func (t *DeriveTicker) GetIV() float64 {
+	if t.OptionPricing == nil {
+		return 0
+	}
+	var f float64
+	fmt.Sscanf(t.OptionPricing.IV, "%f", &f)
 	return f
 }
 

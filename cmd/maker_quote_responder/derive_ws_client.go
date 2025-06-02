@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,7 @@ func NewDeriveWSClient(privateKey string, deriveWallet string) (*DeriveWSClient,
 
 	// Connect to Derive WebSocket
 	wsURL := "wss://api.lyra.finance/ws"
+	log.Printf("[Derive WS] Connecting to %s", wsURL)
 	debugLog("[Derive WS] Connecting to %s", wsURL)
 	
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -162,12 +164,16 @@ func (c *DeriveWSClient) login() error {
 			Error  *struct {
 				Code    int    `json:"code"`
 				Message string `json:"message"`
+				Data    interface{} `json:"data"`
 			} `json:"error"`
 		}
 		if err := json.Unmarshal(resp, &result); err != nil {
 			return fmt.Errorf("failed to parse login response: %w", err)
 		}
 		if result.Error != nil {
+			// Always log full error details for debugging
+			log.Printf("[Derive WS] Login error - Code: %d, Message: %s, Data: %v", 
+				result.Error.Code, result.Error.Message, result.Error.Data)
 			return fmt.Errorf("login error: %s", result.Error.Message)
 		}
 		

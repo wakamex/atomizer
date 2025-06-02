@@ -98,7 +98,7 @@ func (d *DeriveAuth) GetAddress() string {
 	return d.address.Hex()
 }
 
-// GetPrivateKey returns the private key for signing
+// GetPrivateKey returns the private key
 func (d *DeriveAuth) GetPrivateKey() *ecdsa.PrivateKey {
 	return d.privateKey
 }

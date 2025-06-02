@@ -248,8 +248,8 @@ func (a *GammaDDHAlgo) HedgerAction(state *GammaDDHState, client WsClient, direc
 		openIDs = state.AskIDs
 	}
 
-	if amount.LessThan(ticker.MinimumAmount) {
-		log.Printf("Amount calculated too small: %s", amount)
+	if amount.Abs().LessThan(ticker.MinimumAmount) {
+		log.Printf("Amount calculated too small: %s (minimum: %s)", amount, ticker.MinimumAmount)
 		if len(openIDs) >= 1 {
 			return client.CancelByLabel(a.SubaccountID, label)
 		}
@@ -354,6 +354,7 @@ func (a *GammaDDHAlgo) GetAlgoState(market MarketData) (*GammaDDHState, error) {
 		log.Printf("Position: %s, %s", position.InstrumentName, position.Amount)
 		ticker, err := market.GetTicker(position.InstrumentName)
 		if err != nil {
+			log.Printf("Failed to get ticker for %s: %v", position.InstrumentName, err)
 			continue
 		}
 
@@ -363,8 +364,17 @@ func (a *GammaDDHAlgo) GetAlgoState(market MarketData) (*GammaDDHState, error) {
 				position.Amount.Mul(ticker.OptionPricing.Gamma).Mul(pctVar))
 			state.NetDelta = state.NetDelta.Add(
 				position.Amount.Mul(ticker.OptionPricing.Delta).Mul(pctVar))
+			log.Printf("Option %s: Delta=%s, Gamma=%s, pctVar=%s", 
+				position.InstrumentName, 
+				ticker.OptionPricing.Delta.String(), 
+				ticker.OptionPricing.Gamma.String(),
+				pctVar.String())
 		} else if ticker.InstrumentName == a.PerpName {
 			state.NetDelta = state.NetDelta.Add(position.Amount)
+			log.Printf("Perp %s: Added %s to delta", position.InstrumentName, position.Amount.String())
+		} else {
+			log.Printf("No pricing data for %s (OptionPricing=%v, OptionDetails=%v)", 
+				position.InstrumentName, ticker.OptionPricing != nil, ticker.OptionDetails != nil)
 		}
 	}
 

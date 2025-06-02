@@ -17,6 +17,7 @@ type TradeSourceType string
 const (
 	TradeSourceRysk   TradeSourceType = "RYSK_RFQ"
 	TradeSourceManual TradeSourceType = "MANUAL"
+	TradeSourceHedge  TradeSourceType = "HEDGE"
 )
 
 // TradeStatus represents the current status of a trade
@@ -57,6 +58,7 @@ type ArbitrageOrchestrator struct {
 	hedgeManager   *HedgeManager
 	riskManager    *RiskManager
 	gammaModule    *GammaDDHAlgo
+	gammaHedger    *GammaHedger  // New integrated gamma hedger
 	tradeQueue     chan TradeEvent
 	activeTrades   map[string]*TradeEvent
 	mu             sync.RWMutex
@@ -85,11 +87,15 @@ func NewArbitrageOrchestrator(cfg *AppConfig, exchange Exchange, existingPositio
 		}
 	}
 	
+	hedgeManager := NewHedgeManager(exchange, cfg)
+	gammaHedger := NewGammaHedger(exchange, cfg, hedgeManager)
+	
 	return &ArbitrageOrchestrator{
 		config:       cfg,
-		hedgeManager: NewHedgeManager(exchange, cfg),
+		hedgeManager: hedgeManager,
 		riskManager:  riskManager,
 		gammaModule:  NewGammaDDHAlgo(exchange, cfg.GammaThreshold),
+		gammaHedger:  gammaHedger,
 		tradeQueue:   make(chan TradeEvent, 100),
 		activeTrades: make(map[string]*TradeEvent),
 		ctx:          ctx,
@@ -106,6 +112,11 @@ func (o *ArbitrageOrchestrator) Start() error {
 	
 	// Start gamma hedging if enabled
 	if o.config.EnableGammaHedging {
+		// Start the integrated gamma hedger
+		if err := o.gammaHedger.Start(); err != nil {
+			log.Printf("Failed to start gamma hedger: %v", err)
+		}
+		// Also start the legacy gamma module if needed
 		go o.gammaModule.Start(o.ctx)
 	}
 	
@@ -116,6 +127,11 @@ func (o *ArbitrageOrchestrator) Start() error {
 func (o *ArbitrageOrchestrator) Stop() {
 	log.Println("Stopping arbitrage orchestrator...")
 	o.cancel()
+	
+	// Stop gamma hedger if running
+	if o.config.EnableGammaHedging {
+		o.gammaHedger.Stop()
+	}
 }
 
 // SubmitRFQTrade converts an RFQ into a trade event
