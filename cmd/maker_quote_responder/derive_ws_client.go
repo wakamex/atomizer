@@ -195,6 +195,16 @@ func (c *DeriveWSClient) handleMessages() {
 			debugLog("[Derive WS] Read error: %v", err)
 			return
 		}
+		
+		// Log raw message for debugging
+		if len(message) == 0 {
+			log.Printf("[Derive WS] WARNING: Received empty message from WebSocket")
+			continue
+		} else if len(message) < 500 {
+			debugLog("[Derive WS] Raw message: %s", string(message))
+		} else {
+			debugLog("[Derive WS] Raw message (truncated): %s...", string(message[:500]))
+		}
 
 		// First try to parse as a subscription update
 		var subMsg struct {
@@ -221,6 +231,14 @@ func (c *DeriveWSClient) handleMessages() {
 		// Handle response
 		c.mu.Lock()
 		if ch, ok := c.requests[msg.ID]; ok {
+			// Log the raw message being sent to the channel
+			if len(message) == 0 {
+				log.Printf("[Derive WS] WARNING: Sending empty message to request %s", msg.ID)
+			} else if len(message) < 100 {
+				debugLog("[Derive WS] Sending response to request %s: %s", msg.ID, string(message))
+			} else {
+				debugLog("[Derive WS] Sending response to request %s (length: %d)", msg.ID, len(message))
+			}
 			ch <- message
 			delete(c.requests, msg.ID)
 		}
@@ -501,6 +519,11 @@ func (c *DeriveWSClient) GetWallet() string {
 
 // GetPositions fetches all positions for the subaccount
 func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interface{}, error) {
+	// Check if WebSocket is still connected
+	if c.conn == nil {
+		return nil, fmt.Errorf("WebSocket connection is nil")
+	}
+	
 	id := fmt.Sprintf("%d", time.Now().UnixMilli())
 	
 	req := map[string]interface{}{
@@ -512,12 +535,19 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 		"id": id,
 	}
 	
-	debugLog("[Derive WS] Querying positions for subaccount %d", subaccountID)
+	log.Printf("[Derive WS] Querying positions for subaccount %d with request ID: %s", subaccountID, id)
+	debugLog("[Derive WS] Full request: %+v", req)
 	
 	respChan := c.sendRequest(req)
 	
 	select {
 	case resp := <-respChan:
+		// Check if response is empty
+		if len(resp) == 0 {
+			log.Printf("[Derive WS] ERROR: Received empty response for positions request")
+			return nil, fmt.Errorf("received empty response from WebSocket")
+		}
+		
 		var result struct {
 			Result struct {
 				SubaccountID int                      `json:"subaccount_id"`
@@ -530,6 +560,12 @@ func (c *DeriveWSClient) GetPositions(subaccountID uint64) ([]map[string]interfa
 		}
 		
 		if err := json.Unmarshal(resp, &result); err != nil {
+			// Log the response that failed to parse
+			if len(resp) < 1000 {
+				log.Printf("[Derive WS] Failed to parse positions response. Raw response: %s", string(resp))
+			} else {
+				log.Printf("[Derive WS] Failed to parse positions response. Raw response length: %d, first 1000 chars: %s", len(resp), string(resp[:1000]))
+			}
 			return nil, fmt.Errorf("failed to parse positions response: %w", err)
 		}
 		
