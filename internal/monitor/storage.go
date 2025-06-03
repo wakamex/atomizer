@@ -24,41 +24,41 @@ func (v *VMStorage) Write(metrics []Metric) error {
 	if len(metrics) == 0 {
 		return nil
 	}
-	
+
 	// Convert metrics to Prometheus format
 	promData := v.toPrometheusFormat(metrics)
-	
+
 	// Send to VictoriaMetrics
 	url := fmt.Sprintf("%s/api/v1/import/prometheus", v.url)
 	req, err := http.NewRequest("POST", url, bytes.NewBufferString(promData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	req.Header.Set("Content-Type", "text/plain")
-	
+
 	resp, err := v.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to send metrics: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-	
+
 	return nil
 }
 
 func (v *VMStorage) toPrometheusFormat(metrics []Metric) string {
 	var builder strings.Builder
-	
+
 	for _, m := range metrics {
 		timestamp := m.Timestamp.UnixMilli()
-		
+
 		// Create labels
 		labels := fmt.Sprintf(`exchange="%s",instrument="%s"`, m.Exchange, m.Instrument)
-		
+
 		// Write each metric field
 		v.writeMetric(&builder, "market_bid_price", labels, m.BidPrice, timestamp)
 		v.writeMetric(&builder, "market_ask_price", labels, m.AskPrice, timestamp)
@@ -69,7 +69,7 @@ func (v *VMStorage) toPrometheusFormat(metrics []Metric) string {
 		v.writeMetric(&builder, "market_open_price", labels, m.OpenPrice, timestamp)
 		v.writeMetric(&builder, "market_high_price", labels, m.HighPrice, timestamp)
 		v.writeMetric(&builder, "market_low_price", labels, m.LowPrice, timestamp)
-		
+
 		// Calculate and write spread
 		if m.AskPrice > 0 && m.BidPrice > 0 {
 			spread := m.AskPrice - m.BidPrice
@@ -78,7 +78,7 @@ func (v *VMStorage) toPrometheusFormat(metrics []Metric) string {
 			v.writeMetric(&builder, "market_spread_percent", labels, spreadPercent, timestamp)
 		}
 	}
-	
+
 	return builder.String()
 }
 

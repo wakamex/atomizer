@@ -53,7 +53,7 @@ type Metric struct {
 
 func New(config *Config) (*Monitor, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	m := &Monitor{
 		config:     config,
 		collectors: make(map[string]Collector),
@@ -161,15 +161,15 @@ func (m *Monitor) startVictoriaMetrics() error {
 	}
 
 	log.Printf("Starting VictoriaMetrics with data path: %s", dataPath)
-	m.vmProcess = exec.Command(binaryPath, 
+	m.vmProcess = exec.Command(binaryPath,
 		"-storageDataPath", dataPath,
 		"-retentionPeriod", "12",
 		"-search.maxStalenessInterval", "5m",
 	)
-	
+
 	m.vmProcess.Stdout = os.Stdout
 	m.vmProcess.Stderr = os.Stderr
-	
+
 	if err := m.vmProcess.Start(); err != nil {
 		return fmt.Errorf("failed to start VictoriaMetrics: %w", err)
 	}
@@ -179,11 +179,11 @@ func (m *Monitor) startVictoriaMetrics() error {
 
 func (m *Monitor) collectionLoop(collector Collector) {
 	defer m.wg.Done()
-	
+
 	// Add jitter to avoid all collectors hitting APIs at the same time
 	jitter := time.Duration(float64(m.config.Interval) * 0.1)
 	time.Sleep(time.Duration(rand.Int63n(int64(jitter))))
-	
+
 	ticker := time.NewTicker(m.config.Interval)
 	defer ticker.Stop()
 
@@ -226,13 +226,13 @@ func (m *Monitor) collect(collector Collector) {
 func (m *Monitor) GetStats() (map[string]interface{}, error) {
 	// Query VictoriaMetrics for stats
 	stats := make(map[string]interface{})
-	
+
 	// TODO: Implement stats queries using PromQL
 	// - Total data points
 	// - Data points per exchange
 	// - Latest collection timestamps
 	// - Storage size
-	
+
 	return stats, nil
 }
 
@@ -241,22 +241,22 @@ func (m *Monitor) Export(format string, output string, start, end time.Time) err
 	// - Query data from VictoriaMetrics
 	// - Format as CSV, JSON, or Parquet
 	// - Write to output file
-	
+
 	return fmt.Errorf("export not yet implemented")
 }
 
 func (m *Monitor) spotCollectionLoop() {
 	defer m.wg.Done()
-	
+
 	// Use a faster interval for spot prices as they change frequently
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	log.Printf("Starting spot price collection every 10s")
-	
+
 	// Initial collection
 	m.collectSpotPrices()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -269,11 +269,11 @@ func (m *Monitor) spotCollectionLoop() {
 
 func (m *Monitor) collectSpotPrices() {
 	spotPrices := m.spotCollector.GetAllSpotPrices()
-	
+
 	if len(spotPrices) == 0 {
 		return
 	}
-	
+
 	// Convert spot prices to metrics
 	metrics := make([]Metric, 0, len(spotPrices))
 	for currency, spot := range spotPrices {
@@ -288,12 +288,12 @@ func (m *Monitor) collectSpotPrices() {
 		}
 		metrics = append(metrics, metric)
 	}
-	
+
 	// Write to storage
 	if err := m.storage.Write(metrics); err != nil {
 		log.Printf("Failed to write spot prices: %v", err)
 		return
 	}
-	
+
 	log.Printf("Collected spot prices: %v", spotPrices)
 }
