@@ -1,8 +1,6 @@
 package monitor
 
-import (
-	"log"
-)
+import "log"
 
 // Logger provides debug logging functionality
 type Logger struct {

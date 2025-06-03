@@ -24,16 +24,16 @@ func MatchesPattern(symbol string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return true
 	}
-	
+
 	symbolUpper := strings.ToUpper(symbol)
 	for _, pattern := range patterns {
 		patternUpper := strings.ToUpper(pattern)
-		
+
 		// Exact match
 		if symbolUpper == patternUpper {
 			return true
 		}
-		
+
 		// Contains match (for patterns like "ETH")
 		if strings.Contains(symbolUpper, patternUpper) {
 			return true
@@ -47,13 +47,13 @@ func FilterInstruments(instruments []string, patterns []string) []string {
 	if len(patterns) == 0 {
 		return instruments
 	}
-	
+
 	filtered := []string{}
 	for _, inst := range instruments {
 		if MatchesPattern(inst, patterns) {
 			filtered = append(filtered, inst)
 		}
 	}
-	
+
 	return filtered
 }

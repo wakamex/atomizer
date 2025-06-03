@@ -11,8 +11,8 @@ import (
 // InstrumentConverter converts between different exchange naming conventions
 type InstrumentConverter struct {
 	// Regex patterns for different formats
-	derivePattern  *regexp.Regexp  // ETH-20250531-2700-C
-	deribitPattern *regexp.Regexp  // ETH-31MAY25-2700-C
+	derivePattern  *regexp.Regexp // ETH-20250531-2700-C
+	deribitPattern *regexp.Regexp // ETH-31MAY25-2700-C
 }
 
 func NewInstrumentConverter() *InstrumentConverter {
@@ -28,7 +28,7 @@ func (ic *InstrumentConverter) ConvertForExchange(instrument, exchange string) s
 	if strings.Contains(instrument, "PERPETUAL") || strings.Contains(instrument, "PERP") {
 		return instrument
 	}
-	
+
 	// Try to parse as Derive format first
 	if matches := ic.derivePattern.FindStringSubmatch(instrument); matches != nil {
 		if exchange == "derive" {
@@ -37,7 +37,7 @@ func (ic *InstrumentConverter) ConvertForExchange(instrument, exchange string) s
 		// Convert to Deribit format
 		return ic.deriveToDeribit(matches[1], matches[2], matches[3], matches[4])
 	}
-	
+
 	// Try to parse as Deribit format
 	if matches := ic.deribitPattern.FindStringSubmatch(instrument); matches != nil {
 		if exchange == "deribit" {
@@ -46,7 +46,7 @@ func (ic *InstrumentConverter) ConvertForExchange(instrument, exchange string) s
 		// Convert to Derive format
 		return ic.deribitToDerive(matches[1], matches[2], matches[3], matches[4], matches[5], matches[6])
 	}
-	
+
 	// Return original if no pattern matches (might be a simple pattern like "ETH")
 	return instrument
 }
@@ -58,10 +58,10 @@ func (ic *InstrumentConverter) deriveToDeribit(asset, dateStr, strike, optionTyp
 	if err != nil {
 		return "" // Invalid date
 	}
-	
+
 	// Format as DDMMMYY
 	deribitDate := strings.ToUpper(date.Format("2Jan06"))
-	
+
 	return fmt.Sprintf("%s-%s-%s-%s", asset, deribitDate, strike, optionType)
 }
 
@@ -73,17 +73,17 @@ func (ic *InstrumentConverter) deribitToDerive(asset, day, month, year, strike, 
 		return ""
 	}
 	fullYear := 2000 + yearInt
-	
+
 	// Parse the date
 	dateStr := fmt.Sprintf("%s%s%d", day, month, fullYear)
 	date, err := time.Parse("2Jan2006", dateStr)
 	if err != nil {
 		return "" // Invalid date
 	}
-	
+
 	// Format as YYYYMMDD
 	deriveDate := date.Format("20060102")
-	
+
 	return fmt.Sprintf("%s-%s-%s-%s", asset, deriveDate, strike, optionType)
 }
 
@@ -91,7 +91,7 @@ func (ic *InstrumentConverter) deribitToDerive(asset, day, month, year, strike, 
 func (ic *InstrumentConverter) ConvertInstrumentList(instruments []string, exchange string) []string {
 	converted := make([]string, 0, len(instruments))
 	seen := make(map[string]bool)
-	
+
 	for _, inst := range instruments {
 		convertedInst := ic.ConvertForExchange(inst, exchange)
 		if convertedInst != "" && !seen[convertedInst] {
@@ -99,6 +99,6 @@ func (ic *InstrumentConverter) ConvertInstrumentList(instruments []string, excha
 			seen[convertedInst] = true
 		}
 	}
-	
+
 	return converted
 }

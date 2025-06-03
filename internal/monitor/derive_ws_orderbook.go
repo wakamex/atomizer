@@ -13,15 +13,15 @@ import (
 
 // DeriveWSOrderBookCollector collects order book data via WebSocket
 type DeriveWSOrderBookCollector struct {
-	conn         *websocket.Conn
-	converter    *InstrumentConverter
-	depth        int
-	orderBooks   map[string]*OrderBookMetric
-	mu           sync.RWMutex
-	subscribers  map[string]bool
-	ctx          context.Context
-	cancel       context.CancelFunc
-	reconnectCh  chan struct{}
+	conn        *websocket.Conn
+	converter   *InstrumentConverter
+	depth       int
+	orderBooks  map[string]*OrderBookMetric
+	mu          sync.RWMutex
+	subscribers map[string]bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	reconnectCh chan struct{}
 }
 
 // DeriveWSMessage represents a WebSocket message
@@ -47,9 +47,9 @@ func NewDeriveWSOrderBookCollector(depth int) (*DeriveWSOrderBookCollector, erro
 	if depth <= 0 {
 		depth = 10
 	}
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	collector := &DeriveWSOrderBookCollector{
 		converter:   NewInstrumentConverter(),
 		depth:       depth,
@@ -59,42 +59,42 @@ func NewDeriveWSOrderBookCollector(depth int) (*DeriveWSOrderBookCollector, erro
 		cancel:      cancel,
 		reconnectCh: make(chan struct{}, 1),
 	}
-	
+
 	// Connect to WebSocket
 	if err := collector.connect(); err != nil {
 		cancel()
 		return nil, err
 	}
-	
+
 	// Start message handler
 	go collector.handleMessages()
-	
+
 	// Start reconnection handler
 	go collector.handleReconnection()
-	
+
 	return collector, nil
 }
 
 func (d *DeriveWSOrderBookCollector) connect() error {
 	wsURL := "wss://api.lyra.finance/ws"
 	log.Printf("[Derive WS OrderBook] Connecting to %s", wsURL)
-	
+
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Derive WebSocket: %w", err)
 	}
-	
+
 	d.conn = conn
-	
+
 	// Set up ping/pong handlers
 	conn.SetPingHandler(func(appData string) error {
 		log.Printf("[Derive WS OrderBook] Ping received, sending Pong")
 		return conn.WriteControl(websocket.PongMessage, []byte{}, time.Now().Add(5*time.Second))
 	})
-	
+
 	// Send heartbeat periodically
 	go d.sendHeartbeat()
-	
+
 	// Re-subscribe to all instruments
 	d.mu.RLock()
 	instruments := make([]string, 0, len(d.subscribers))
@@ -102,13 +102,13 @@ func (d *DeriveWSOrderBookCollector) connect() error {
 		instruments = append(instruments, inst)
 	}
 	d.mu.RUnlock()
-	
+
 	for _, inst := range instruments {
 		if err := d.subscribeInstrument(inst); err != nil {
 			log.Printf("[Derive WS OrderBook] Failed to resubscribe to %s: %v", inst, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -119,10 +119,10 @@ func (d *DeriveWSOrderBookCollector) handleReconnection() {
 			return
 		case <-d.reconnectCh:
 			log.Println("[Derive WS OrderBook] Attempting to reconnect...")
-			
+
 			// Wait a bit before reconnecting
 			time.Sleep(5 * time.Second)
-			
+
 			if err := d.connect(); err != nil {
 				log.Printf("[Derive WS OrderBook] Reconnection failed: %v", err)
 				// Trigger another reconnection attempt
@@ -140,7 +140,7 @@ func (d *DeriveWSOrderBookCollector) handleReconnection() {
 func (d *DeriveWSOrderBookCollector) sendHeartbeat() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -151,7 +151,7 @@ func (d *DeriveWSOrderBookCollector) sendHeartbeat() {
 				"method":  "public/heartbeat",
 				"params":  map[string]interface{}{},
 			}
-			
+
 			if err := d.conn.WriteJSON(msg); err != nil {
 				log.Printf("[Derive WS OrderBook] Failed to send heartbeat: %v", err)
 				d.triggerReconnect()
@@ -180,7 +180,7 @@ func (d *DeriveWSOrderBookCollector) handleMessages() {
 				d.triggerReconnect()
 				return
 			}
-			
+
 			// Debug: Log raw message
 			msgStr := string(msg)
 			if len(msgStr) > 200 {
@@ -188,12 +188,12 @@ func (d *DeriveWSOrderBookCollector) handleMessages() {
 			} else {
 				Debugf("[DEBUG] Derive WS message: %s", msgStr)
 			}
-			
+
 			// Try to parse as subscription update
 			var update struct {
 				Params DeriveOrderBookUpdate `json:"params"`
 			}
-			
+
 			if err := json.Unmarshal(msg, &update); err == nil && update.Params.Channel != "" {
 				Debugf("[DEBUG] Processing order book update for %s", update.Params.Data.InstrumentName)
 				d.processOrderBookUpdate(update.Params)
@@ -211,7 +211,7 @@ func (d *DeriveWSOrderBookCollector) processOrderBookUpdate(update DeriveOrderBo
 		Bids:       make([]OrderBookLevel, 0, len(update.Data.Bids)),
 		Asks:       make([]OrderBookLevel, 0, len(update.Data.Asks)),
 	}
-	
+
 	// Convert bids
 	for _, bid := range update.Data.Bids {
 		if len(bid) >= 2 {
@@ -223,7 +223,7 @@ func (d *DeriveWSOrderBookCollector) processOrderBookUpdate(update DeriveOrderBo
 			})
 		}
 	}
-	
+
 	// Convert asks
 	for _, ask := range update.Data.Asks {
 		if len(ask) >= 2 {
@@ -235,7 +235,7 @@ func (d *DeriveWSOrderBookCollector) processOrderBookUpdate(update DeriveOrderBo
 			})
 		}
 	}
-	
+
 	// Store the latest order book
 	d.mu.Lock()
 	d.orderBooks[update.Data.InstrumentName] = metric
@@ -245,17 +245,17 @@ func (d *DeriveWSOrderBookCollector) processOrderBookUpdate(update DeriveOrderBo
 func (d *DeriveWSOrderBookCollector) Subscribe(instruments []string) error {
 	// Convert instruments to Derive format
 	deriveInstruments := d.converter.ConvertInstrumentList(instruments, "derive")
-	
+
 	for _, instrument := range deriveInstruments {
 		if err := d.subscribeInstrument(instrument); err != nil {
 			return err
 		}
-		
+
 		d.mu.Lock()
 		d.subscribers[instrument] = true
 		d.mu.Unlock()
 	}
-	
+
 	return nil
 }
 
@@ -267,9 +267,9 @@ func (d *DeriveWSOrderBookCollector) subscribeInstrument(instrument string) erro
 	} else if d.depth > 20 {
 		depthParam = "100"
 	}
-	
+
 	channel := fmt.Sprintf("orderbook.%s.1.%s", instrument, depthParam)
-	
+
 	// Use JSON-RPC format
 	msg := map[string]interface{}{
 		"jsonrpc": "2.0",
@@ -279,11 +279,11 @@ func (d *DeriveWSOrderBookCollector) subscribeInstrument(instrument string) erro
 		},
 		"id": fmt.Sprintf("subscribe_%s_%d", instrument, time.Now().Unix()),
 	}
-	
+
 	if err := d.conn.WriteJSON(msg); err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", instrument, err)
 	}
-	
+
 	log.Printf("[Derive WS OrderBook] Subscribed to %s", channel)
 	return nil
 }
@@ -291,7 +291,7 @@ func (d *DeriveWSOrderBookCollector) subscribeInstrument(instrument string) erro
 func (d *DeriveWSOrderBookCollector) Unsubscribe(instruments []string) error {
 	// Convert instruments to Derive format
 	deriveInstruments := d.converter.ConvertInstrumentList(instruments, "derive")
-	
+
 	for _, instrument := range deriveInstruments {
 		depthParam := "10"
 		if d.depth > 10 && d.depth <= 20 {
@@ -299,9 +299,9 @@ func (d *DeriveWSOrderBookCollector) Unsubscribe(instruments []string) error {
 		} else if d.depth > 20 {
 			depthParam = "100"
 		}
-		
+
 		channel := fmt.Sprintf("orderbook.%s.1.%s", instrument, depthParam)
-		
+
 		msg := map[string]interface{}{
 			"jsonrpc": "2.0",
 			"method":  "unsubscribe",
@@ -310,24 +310,24 @@ func (d *DeriveWSOrderBookCollector) Unsubscribe(instruments []string) error {
 			},
 			"id": fmt.Sprintf("unsubscribe_%s_%d", instrument, time.Now().Unix()),
 		}
-		
+
 		if err := d.conn.WriteJSON(msg); err != nil {
 			return fmt.Errorf("failed to unsubscribe from %s: %w", instrument, err)
 		}
-		
+
 		d.mu.Lock()
 		delete(d.subscribers, instrument)
 		delete(d.orderBooks, instrument)
 		d.mu.Unlock()
 	}
-	
+
 	return nil
 }
 
 func (d *DeriveWSOrderBookCollector) GetOrderBooks() []OrderBookMetric {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	
+
 	orderBooks := make([]OrderBookMetric, 0, len(d.orderBooks))
 	for _, ob := range d.orderBooks {
 		// Only return recent order books (less than 10 seconds old)
@@ -335,13 +335,13 @@ func (d *DeriveWSOrderBookCollector) GetOrderBooks() []OrderBookMetric {
 			orderBooks = append(orderBooks, *ob)
 		}
 	}
-	
+
 	return orderBooks
 }
 
 func (d *DeriveWSOrderBookCollector) Close() error {
 	d.cancel()
-	
+
 	if d.conn != nil {
 		// Send unsubscribe for all instruments
 		d.mu.RLock()
@@ -350,13 +350,13 @@ func (d *DeriveWSOrderBookCollector) Close() error {
 			instruments = append(instruments, inst)
 		}
 		d.mu.RUnlock()
-		
+
 		d.Unsubscribe(instruments)
-		
+
 		// Close connection
 		d.conn.Close()
 	}
-	
+
 	return nil
 }
 

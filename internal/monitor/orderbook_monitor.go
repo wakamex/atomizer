@@ -24,14 +24,14 @@ type OrderBookMonitor struct {
 // NewOrderBookMonitor creates a new order book monitor
 func NewOrderBookMonitor(config *Config, depth int) (*OrderBookMonitor, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	m := &OrderBookMonitor{
 		config:  config,
 		storage: NewOrderBookStorage(config.VictoriaMetricsURL),
 		ctx:     ctx,
 		cancel:  cancel,
 	}
-	
+
 	// Initialize collectors based on configured exchanges
 	for _, exchange := range config.Exchanges {
 		switch exchange {
@@ -46,7 +46,7 @@ func NewOrderBookMonitor(config *Config, depth int) (*OrderBookMonitor, error) {
 			m.deriveWSCollector = wsCollector
 		}
 	}
-	
+
 	// Always create spot collector for ETH and BTC prices
 	spotCollector, err := NewDeriveSpotCollector()
 	if err != nil {
@@ -58,13 +58,13 @@ func NewOrderBookMonitor(config *Config, depth int) (*OrderBookMonitor, error) {
 		if err := spotCollector.Subscribe([]string{"ETH", "BTC"}); err != nil {
 			log.Printf("Warning: Failed to subscribe to spot feeds: %v", err)
 		}
-		
+
 		// Set spot collector on Deribit collector for USD display
 		if m.deribitCollector != nil {
 			m.deribitCollector.SetSpotCollector(spotCollector)
 		}
 	}
-	
+
 	return m, nil
 }
 
@@ -75,18 +75,18 @@ func (m *OrderBookMonitor) Start() error {
 			return fmt.Errorf("failed to subscribe to Derive instruments: %w", err)
 		}
 	}
-	
+
 	// Start collection loops
 	if m.deribitCollector != nil {
 		m.wg.Add(1)
 		go m.deribitCollectionLoop()
 	}
-	
+
 	if m.deriveWSCollector != nil {
 		m.wg.Add(1)
 		go m.deriveWSCollectionLoop()
 	}
-	
+
 	// Start spot price collection loop
 	if m.spotCollector != nil {
 		log.Println("Starting spot price collection loop")
@@ -95,41 +95,41 @@ func (m *OrderBookMonitor) Start() error {
 	} else {
 		log.Println("WARNING: Spot collector is nil, not starting spot collection loop")
 	}
-	
+
 	return nil
 }
 
 func (m *OrderBookMonitor) Stop() error {
 	m.cancel()
 	m.wg.Wait()
-	
+
 	// Close WebSocket connections
 	if m.deriveWSCollector != nil {
 		if err := m.deriveWSCollector.Close(); err != nil {
 			log.Printf("Error closing Derive WebSocket: %v", err)
 		}
 	}
-	
+
 	if m.spotCollector != nil {
 		if err := m.spotCollector.Close(); err != nil {
 			log.Printf("Error closing spot collector: %v", err)
 		}
 	}
-	
+
 	return nil
 }
 
 func (m *OrderBookMonitor) deribitCollectionLoop() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(m.config.Interval)
 	defer ticker.Stop()
-	
+
 	log.Printf("Starting Deribit order book collection every %v", m.config.Interval)
-	
+
 	// Initial collection
 	m.collectDeribitOrderBooks()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -146,27 +146,27 @@ func (m *OrderBookMonitor) collectDeribitOrderBooks() {
 		log.Printf("Deribit order book collection error: %v", err)
 		return
 	}
-	
+
 	if len(orderBooks) > 0 {
 		if err := m.storage.WriteOrderBooks(orderBooks); err != nil {
 			log.Printf("Storage error: %v", err)
 			return
 		}
-		
+
 		log.Printf("Collected %d order books from Deribit", len(orderBooks))
-		
+
 		// Log sample order book info
 		if len(orderBooks) > 0 {
 			ob := orderBooks[0]
 			if len(ob.Bids) > 0 && len(ob.Asks) > 0 {
 				spread := ob.Asks[0].Price - ob.Bids[0].Price
-				
+
 				// For Deribit ETH options, convert prices to USD for display
 				displayBidPrice := ob.Bids[0].Price
 				displayAskPrice := ob.Asks[0].Price
 				displaySpread := spread
 				priceUnit := "ETH"
-				
+
 				if m.spotCollector != nil && strings.Contains(ob.Instrument, "ETH") && ob.Exchange == "deribit" {
 					if ethSpot, ok := m.spotCollector.GetSpotPrice("ETH"); ok {
 						// Convert ETH prices to USD for display only
@@ -176,7 +176,7 @@ func (m *OrderBookMonitor) collectDeribitOrderBooks() {
 						priceUnit = fmt.Sprintf("USD (ETH=$%.2f)", ethSpot)
 					}
 				}
-				
+
 				log.Printf("  %s: Bid %.2f x %.2f, Ask %.2f x %.2f, Spread %.2f (%.3f%%) %s",
 					ob.Instrument,
 					displayBidPrice, ob.Bids[0].Size,
@@ -190,12 +190,12 @@ func (m *OrderBookMonitor) collectDeribitOrderBooks() {
 
 func (m *OrderBookMonitor) deriveWSCollectionLoop() {
 	defer m.wg.Done()
-	
+
 	ticker := time.NewTicker(m.config.Interval)
 	defer ticker.Stop()
-	
+
 	log.Printf("Starting Derive WebSocket order book collection every %v", m.config.Interval)
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -208,16 +208,16 @@ func (m *OrderBookMonitor) deriveWSCollectionLoop() {
 
 func (m *OrderBookMonitor) spotCollectionLoop() {
 	defer m.wg.Done()
-	
+
 	// Use a faster interval for spot prices as they change frequently
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
-	
+
 	log.Printf("Starting spot price collection every 10s")
-	
+
 	// Initial collection
 	m.collectSpotPrices()
-	
+
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -230,12 +230,12 @@ func (m *OrderBookMonitor) spotCollectionLoop() {
 
 func (m *OrderBookMonitor) collectSpotPrices() {
 	spotPrices := m.spotCollector.GetAllSpotPrices()
-	
+
 	if len(spotPrices) == 0 {
 		log.Println("No spot prices available yet")
 		return
 	}
-	
+
 	// Convert spot prices to metrics
 	metrics := make([]Metric, 0, len(spotPrices))
 	for currency, spot := range spotPrices {
@@ -250,29 +250,29 @@ func (m *OrderBookMonitor) collectSpotPrices() {
 		}
 		metrics = append(metrics, metric)
 	}
-	
+
 	// Write to storage using the regular VMStorage
 	storage := NewVMStorage(m.config.VictoriaMetricsURL)
 	if err := storage.Write(metrics); err != nil {
 		log.Printf("Failed to write spot prices: %v", err)
 		return
 	}
-	
+
 	log.Printf("Collected spot prices: %v", spotPrices)
 }
 
 func (m *OrderBookMonitor) collectDeriveOrderBooks() {
 	// Get current order books from WebSocket collector
 	orderBooks := m.deriveWSCollector.GetOrderBooks()
-	
+
 	if len(orderBooks) > 0 {
 		if err := m.storage.WriteOrderBooks(orderBooks); err != nil {
 			log.Printf("Storage error: %v", err)
 			return
 		}
-		
+
 		log.Printf("Collected %d order books from Derive WebSocket", len(orderBooks))
-		
+
 		// Log sample order book info
 		if len(orderBooks) > 0 {
 			ob := orderBooks[0]
@@ -285,7 +285,7 @@ func (m *OrderBookMonitor) collectDeriveOrderBooks() {
 						spotInfo = fmt.Sprintf(" (ETH Spot: $%.2f)", ethSpot)
 					}
 				}
-				
+
 				log.Printf("  %s: Bid %.4f x %.2f, Ask %.4f x %.2f, Spread %.4f (%.3f%%)%s",
 					ob.Instrument,
 					ob.Bids[0].Price, ob.Bids[0].Size,

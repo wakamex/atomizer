@@ -55,17 +55,17 @@ func (d *DeriveCollector) Collect(ctx context.Context, instruments []string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instruments: %w", err)
 	}
-	
+
 	// Convert input patterns to Derive format
 	derivePatterns := d.converter.ConvertInstrumentList(instruments, "derive")
-	
+
 	// Filter instruments based on converted patterns
 	filteredInstruments := FilterInstruments(allInstruments, derivePatterns)
-	
+
 	if len(filteredInstruments) == 0 {
 		return []Metric{}, nil
 	}
-	
+
 	// Collect ticker data for each instrument
 	metrics := []Metric{}
 	for _, instrument := range filteredInstruments {
@@ -75,7 +75,7 @@ func (d *DeriveCollector) Collect(ctx context.Context, instruments []string) ([]
 		}
 		metrics = append(metrics, ticker)
 	}
-	
+
 	return metrics, nil
 }
 
@@ -83,42 +83,41 @@ func (d *DeriveCollector) getAllInstruments(ctx context.Context) ([]string, erro
 	url := fmt.Sprintf("%s/public/get_all_instruments", d.baseURL)
 	instruments := []string{}
 	page := 1
-	
+
 	for {
 		// Derive uses POST with JSON payload and pagination
 		payload := map[string]interface{}{
-			"instrument_type": "option",  // Get only options
-			"page":           page,
-			"page_size":      1000,
-			"expired":        false,
+			"instrument_type": "option", // Get only options
+			"page":            page,
+			"page_size":       1000,
+			"expired":         false,
 		}
-		
+
 		jsonData, err := json.Marshal(payload)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
 		if err != nil {
 			return nil, err
 		}
-		
+
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
-		
+
 		resp, err := d.client.Do(req)
 		if err != nil {
 			return nil, err
 		}
 		defer resp.Body.Close()
-		
+
 		// Read the response body for debugging
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read response: %w", err)
 		}
-		
-		
+
 		var result struct {
 			Result struct {
 				Instruments []struct {
@@ -132,64 +131,63 @@ func (d *DeriveCollector) getAllInstruments(ctx context.Context) ([]string, erro
 				} `json:"pagination"`
 			} `json:"result"`
 		}
-		
+
 		if err := json.Unmarshal(body, &result); err != nil {
 			return nil, fmt.Errorf("failed to decode response: %w", err)
 		}
-		
-		
+
 		// Add active instruments
 		for _, inst := range result.Result.Instruments {
 			if inst.IsActive {
 				instruments = append(instruments, inst.InstrumentName)
 			}
 		}
-		
+
 		// Check if there are more pages
 		if page >= result.Result.Pagination.NumPages || result.Result.Pagination.NumPages == 0 {
 			break
 		}
 		page++
 	}
-	
+
 	return instruments, nil
 }
 
 func (d *DeriveCollector) getTicker(ctx context.Context, instrument string) (Metric, error) {
 	url := fmt.Sprintf("%s/public/get_ticker", d.baseURL)
-	
+
 	payload := fmt.Sprintf(`{"instrument_name": "%s"}`, instrument)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer([]byte(payload)))
 	if err != nil {
 		return Metric{}, err
 	}
-	
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	
+
 	resp, err := d.client.Do(req)
 	if err != nil {
 		return Metric{}, err
 	}
 	defer resp.Body.Close()
-	
+
 	var tickerResp struct {
 		Result DeriveTicker `json:"result"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&tickerResp); err != nil {
 		return Metric{}, err
 	}
-	
+
 	ticker := tickerResp.Result
-	
+
 	// Parse string values to float64
 	parseFloat := func(s string) float64 {
 		var f float64
 		fmt.Sscanf(s, "%f", &f)
 		return f
 	}
-	
+
 	bidPrice := parseFloat(ticker.BestBidPrice)
 	askPrice := parseFloat(ticker.BestAskPrice)
 	bidSize := parseFloat(ticker.BestBidAmount)
@@ -199,13 +197,13 @@ func (d *DeriveCollector) getTicker(ctx context.Context, instrument string) (Met
 	high := parseFloat(ticker.Stats.High)
 	low := parseFloat(ticker.Stats.Low)
 	priceChange := parseFloat(ticker.Stats.PriceChange)
-	
+
 	// Calculate open price from price change
 	openPrice := lastPrice
 	if priceChange != 0 {
 		openPrice = lastPrice / (1 + priceChange/100)
 	}
-	
+
 	return Metric{
 		Exchange:   "derive",
 		Instrument: ticker.InstrumentName,
@@ -221,4 +219,3 @@ func (d *DeriveCollector) getTicker(ctx context.Context, instrument string) (Met
 		LowPrice:   low,
 	}, nil
 }
-

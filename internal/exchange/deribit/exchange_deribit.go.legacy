@@ -1,0 +1,210 @@
+package deribit
+
+import (
+	"fmt"
+	"log"
+	"math"
+	"math/big"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// DeribitExchange implements the Exchange interface for Deribit
+type DeribitExchange struct {
+	exchange *ccxt.Deribit
+	config   ExchangeConfig
+}
+
+// NewDeribitExchange creates a new Deribit exchange instance
+func NewDeribitExchange(config ExchangeConfig) *DeribitExchange {
+	apiURL := "https://www.deribit.com"
+	if config.TestMode {
+		apiURL = "https://test.deribit.com"
+		log.Printf("WARNING: Using Deribit testnet. Set --exchange_test_mode=false for production.")
+	}
+
+	exchange := ccxt.NewDeribit(map[string]interface{}{
+		"rateLimit":       config.RateLimit,
+		"enableRateLimit": true,
+		"apiKey":          config.APIKey,
+		"secret":          config.APISecret,
+		"urls": map[string]interface{}{
+			"api": map[string]interface{}{
+				"rest": apiURL,
+			},
+		},
+		"options": map[string]interface{}{
+			"defaultType":             "option",
+			"adjustForTimeDifference": true,
+			"recvWindow":              5000,
+		},
+	})
+
+	return &DeribitExchange{
+		exchange: &exchange,
+		config:   config,
+	}
+}
+
+// GetOrderBook fetches the order book for a given option
+func (d *DeribitExchange) GetOrderBook(req RFQResult, asset string) (CCXTOrderBook, error) {
+	// Convert option details to instrument name
+	instrumentName, err := d.ConvertToInstrument(asset, req.Strike, req.Expiry, req.IsPut)
+	if err != nil {
+		return CCXTOrderBook{}, err
+	}
+
+	// CCXT requires the symbol format with prefix for options
+	ccxtSymbol := fmt.Sprintf("%s/USD:%s", asset, instrumentName)
+
+	// Fetch order book
+	orderBook, err := d.exchange.FetchOrderBook(ccxtSymbol)
+	if err != nil {
+		return CCXTOrderBook{}, fmt.Errorf("failed to fetch order book: %v", err)
+	}
+
+	// Fetch ticker for the option instrument to get its price
+	optionTicker, err := d.exchange.FetchTicker(ccxtSymbol)
+	if err != nil {
+		return CCXTOrderBook{}, fmt.Errorf("failed to fetch option ticker: %v", err)
+	}
+
+	// Get the underlying index price from the option ticker
+	indexPrice := 0.0
+	if optionTicker.Info != nil {
+		// Deribit option tickers include underlying price in the info
+		if underlyingPrice, exists := optionTicker.Info["underlying_price"]; exists {
+			if price, ok := underlyingPrice.(float64); ok {
+				indexPrice = price
+			}
+		}
+	}
+
+	// If we couldn't get index price from option ticker, try to fetch spot/futures
+	if indexPrice == 0.0 {
+		// Try different instrument names that Deribit might support
+		possibleIndexInstruments := []string{
+			asset + "-PERPETUAL", // This is the correct format for Deribit
+			asset + "_USDC-PERPETUAL",
+			asset + "_USD-PERPETUAL",
+		}
+
+		for _, instrument := range possibleIndexInstruments {
+			indexTicker, err := d.exchange.FetchTicker(instrument)
+			if err == nil && indexTicker.Last != nil {
+				indexPrice = *indexTicker.Last
+				break
+			}
+		}
+	}
+
+	// Convert order book to our structure
+	book := CCXTOrderBook{
+		Bids:  orderBook.Bids,
+		Asks:  orderBook.Asks,
+		Index: indexPrice,
+	}
+
+	return book, nil
+}
+
+// PlaceOrder places an order on Deribit
+func (d *DeribitExchange) PlaceOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
+	// The instrument parameter is already in the correct format
+	// No need to convert again
+
+	// Convert quantity from wei to decimal
+	quantityFloat, err := strconv.ParseFloat(conf.Quantity, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse quantity: %w", err)
+	}
+	quantityETH := quantityFloat / math.Pow(10, 18) // Convert from wei to ETH
+
+	// Extract underlying from instrument (e.g., "ETH" from "ETH-25DEC24-2200-C")
+	underlying := "ETH"
+	if parts := strings.Split(instrument, "-"); len(parts) > 0 {
+		underlying = parts[0]
+	}
+
+	// Prepare symbol for order book and order placement
+	ccxtSymbol := fmt.Sprintf("%s/USD:%s", underlying, instrument)
+
+	// Get current order book to find best ask
+	orderBook, err := d.exchange.FetchOrderBook(ccxtSymbol)
+	if err != nil {
+		return fmt.Errorf("failed to fetch order book for hedge: %w", err)
+	}
+
+	// Get best ask price
+	if len(orderBook.Asks) == 0 {
+		return fmt.Errorf("no asks available in order book")
+	}
+	bestAsk := orderBook.Asks[0][0] // First ask price
+
+	// Since Rysk users are always selling calls to us (we buy from them),
+	// we always need to hedge by selling calls on Deribit
+	orderSide := "sell"
+
+	// Place our ask at 2x the best ask for safety (far from top of book)
+	hedgePrice := bestAsk * 2.0
+
+	log.Printf("[Hedge] Best ask: %f, placing our ask at: %f (2x best ask)", bestAsk, hedgePrice)
+
+	// Place the hedge order
+	order, err := d.exchange.CreateOrder(
+		ccxtSymbol,
+		"limit",
+		orderSide,
+		quantityETH,
+		ccxt.WithCreateOrderPrice(hedgePrice),
+		ccxt.WithCreateOrderParams(map[string]interface{}{
+			"advanced": "usd",
+		}),
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to place hedge order: %w", err)
+	}
+
+	orderIdStr := ""
+	if order.Id != nil {
+		orderIdStr = *order.Id
+	}
+	log.Printf("[Hedge] Order placed successfully - ID: %s, Side: %s, Quantity: %f ETH, Price: %f",
+		orderIdStr, orderSide, quantityETH, hedgePrice)
+
+	return nil
+}
+
+// ConvertToInstrument converts option details to Deribit-specific instrument format
+func (d *DeribitExchange) ConvertToInstrument(asset string, strike string, expiry int64, isPut bool) (string, error) {
+	// Convert the strike from a big.Int string to a normal number
+	strikeBigInt, ok := new(big.Int).SetString(strike, 10)
+	if !ok {
+		return "", fmt.Errorf("invalid strike")
+	}
+	strike = strikeBigInt.Div(strikeBigInt, new(big.Int).SetUint64(1e8)).String()
+
+	// Convert the expiry from a timestamp seconds into a Deribit compatible date time
+	deribitExpiry := strings.ToUpper(time.Unix(expiry, 0).Format("2Jan06"))
+
+	// Convert isPut to "C" or "P"
+	optionType := "C"
+	if isPut {
+		optionType = "P"
+		// Note: Remove this restriction if puts are supported
+		return "", fmt.Errorf("puts not supported")
+	}
+
+	// Construct the instrument name in Deribit format: ASSET-EXPIRY-STRIKE-TYPE
+	instrumentName := asset + "-" + deribitExpiry + "-" + strike + "-" + optionType
+	return instrumentName, nil
+}
+
+// GetPositions fetches all open positions from Deribit
+func (d *DeribitExchange) GetPositions() ([]ExchangePosition, error) {
+	// TODO: Implement Deribit position fetching via CCXT
+	log.Printf("[Deribit] GetPositions not yet implemented")
+	return []ExchangePosition{}, nil
+}

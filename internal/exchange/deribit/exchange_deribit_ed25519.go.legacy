@@ -1,0 +1,105 @@
+package deribit
+
+import (
+	"fmt"
+	"log"
+	"time"
+)
+
+// DeribitExchangeEd25519 wraps CCXT Deribit with Ed25519 authentication
+type DeribitExchangeEd25519 struct {
+	*DeribitExchange
+	ed25519Client *DeribitEd25519Client
+	accessToken   string
+	tokenExpiry   time.Time
+}
+
+// NewDeribitExchangeEd25519 creates a Deribit exchange with Ed25519 auth
+func NewDeribitExchangeEd25519(config ExchangeConfig, clientID, privateKeyPEM string) (*DeribitExchangeEd25519, error) {
+	// Create Ed25519 client
+	ed25519Client, err := NewDeribitEd25519Client(clientID, privateKeyPEM, config.TestMode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Ed25519 client: %w", err)
+	}
+
+	// Get initial access token
+	accessToken, err := ed25519Client.Authenticate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to authenticate: %w", err)
+	}
+
+	// Create CCXT exchange with bearer token
+	apiURL := "https://www.deribit.com"
+	if config.TestMode {
+		apiURL = "https://test.deribit.com"
+	}
+
+	// HACK: Use the access token as both key and secret
+	// CCXT will use these to build Authorization header
+	exchange := ccxt.NewDeribit(map[string]interface{}{
+		"rateLimit":       config.RateLimit,
+		"enableRateLimit": true,
+		"apiKey":          "Bearer",
+		"secret":          accessToken,
+		"urls": map[string]interface{}{
+			"api": map[string]interface{}{
+				"rest": apiURL,
+			},
+		},
+		"options": map[string]interface{}{
+			"defaultType":             "option",
+			"adjustForTimeDifference": true,
+			"recvWindow":              5000,
+			// Override auth type
+			"authenticationMethod": "bearer",
+		},
+	})
+
+	// Monkey patch the sign method to use bearer token
+	// This is hacky but works with CCXT's architecture
+
+	base := &DeribitExchange{
+		exchange: &exchange,
+		config:   config,
+	}
+
+	return &DeribitExchangeEd25519{
+		DeribitExchange: base,
+		ed25519Client:   ed25519Client,
+		accessToken:     accessToken,
+		tokenExpiry:     time.Now().Add(55 * time.Minute), // Assume 1 hour validity
+	}, nil
+}
+
+// refreshTokenIfNeeded checks and refreshes the access token
+func (d *DeribitExchangeEd25519) refreshTokenIfNeeded() error {
+	if time.Now().After(d.tokenExpiry) {
+		log.Println("Access token expired, refreshing...")
+		accessToken, err := d.ed25519Client.Authenticate()
+		if err != nil {
+			return fmt.Errorf("failed to refresh token: %w", err)
+		}
+		d.accessToken = accessToken
+		d.tokenExpiry = time.Now().Add(55 * time.Minute)
+
+		// Update CCXT's secret with new token
+		d.exchange.Secret = accessToken
+		log.Println("Access token refreshed successfully")
+	}
+	return nil
+}
+
+// Override methods to add token refresh
+func (d *DeribitExchangeEd25519) GetOrderBook(req RFQResult, asset string) (CCXTOrderBook, error) {
+	if err := d.refreshTokenIfNeeded(); err != nil {
+		return CCXTOrderBook{}, err
+	}
+	return d.DeribitExchange.GetOrderBook(req, asset)
+}
+
+func (d *DeribitExchangeEd25519) PlaceOrder(conf RFQConfirmation, instrument string, cfg *AppConfig) error {
+	if err := d.refreshTokenIfNeeded(); err != nil {
+		return err
+	}
+	return d.DeribitExchange.PlaceOrder(conf, instrument, cfg)
+}

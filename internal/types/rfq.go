@@ -2,12 +2,12 @@ package types
 
 // RFQNotification represents the structure of an incoming RFQ message from the server
 type RFQNotification struct {
-	JsonRPC string       `json:"jsonrpc"`
-	ID      string       `json:"id"`
-	Result  RFQResult    `json:"result,omitempty"`
+	JsonRPC string        `json:"jsonrpc"`
+	ID      string        `json:"id"`
+	Result  RFQResult     `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
-	Method  string       `json:"method,omitempty"`
-	Params  RFQResult    `json:"params,omitempty"`
+	Method  string        `json:"method,omitempty"`
+	Params  RFQResult     `json:"params,omitempty"`
 }
 
 // RFQResult contains the actual details of the RFQ
@@ -32,7 +32,7 @@ type RFQResult struct {
 
 // RFQConfirmation represents the structure of an incoming RFQ confirmation message
 type RFQConfirmation struct {
-	ID              string  `json:"id,omitempty"`	
+	ID              string  `json:"id,omitempty"`
 	Maker           string  `json:"maker"`
 	AssetAddress    string  `json:"assetAddress"`
 	ChainID         int     `json:"chainId"`
