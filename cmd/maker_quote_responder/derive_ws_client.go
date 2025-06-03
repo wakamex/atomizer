@@ -19,6 +19,7 @@ type DeriveWSClient struct {
 	wallet       string
 	subaccounts  []int
 	mu           sync.Mutex
+	writeMu      sync.Mutex  // Protects WebSocket writes
 	requests     map[string]chan json.RawMessage
 	
 	// Orderbook data
@@ -242,7 +243,11 @@ func (c *DeriveWSClient) resubscribeOrderbooks() {
 			"id": fmt.Sprintf("resubscribe_%d", time.Now().UnixNano()),
 		}
 		
-		if err := c.conn.WriteJSON(msg); err != nil {
+		c.writeMu.Lock()
+		err := c.conn.WriteJSON(msg)
+		c.writeMu.Unlock()
+		
+		if err != nil {
 			log.Printf("[Derive WS] Failed to resubscribe to orderbooks: %v", err)
 		} else {
 			log.Printf("[Derive WS] Resubscribed to %d orderbook channels", len(channels))
@@ -270,15 +275,23 @@ func (c *DeriveWSClient) heartbeat() {
 				continue
 			}
 			
-			// Send ping
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			// Get connection reference while holding lock
+			conn := c.conn
+			c.mu.Unlock()
+			
+			// Send ping with write mutex
+			c.writeMu.Lock()
+			err := conn.WriteMessage(websocket.PingMessage, nil)
+			c.writeMu.Unlock()
+			
+			if err != nil {
 				log.Printf("[Derive WS] Error sending ping: %v", err)
+				c.mu.Lock()
 				c.isConnected = false
 				c.mu.Unlock()
 				c.triggerReconnection()
 				continue
 			}
-			c.mu.Unlock()
 			debugLog("[Derive WS] Ping sent")
 			
 		case <-activityCheckTicker.C:
@@ -566,7 +579,12 @@ func (c *DeriveWSClient) sendRequest(req map[string]interface{}) <-chan json.Raw
 	jsonBytes, _ := json.Marshal(req)
 	debugLog("[Derive WS] Sending JSON: %s", string(jsonBytes))
 	
-	if err := conn.WriteJSON(req); err != nil {
+	// Protect WebSocket write with mutex
+	c.writeMu.Lock()
+	err := conn.WriteJSON(req)
+	c.writeMu.Unlock()
+	
+	if err != nil {
 		log.Printf("[Derive WS] Failed to send request: %v", err)
 		c.mu.Lock()
 		delete(c.requests, id)
@@ -897,8 +915,12 @@ func (c *DeriveWSClient) SubscribeOrderBook(instrument string, depth int) error 
 		c.orderbookMu.Unlock()
 		return fmt.Errorf("cannot subscribe: connection not available")
 	}
-	err := c.conn.WriteJSON(msg)
+	conn := c.conn
 	c.mu.Unlock()
+	
+	c.writeMu.Lock()
+	err := conn.WriteJSON(msg)
+	c.writeMu.Unlock()
 	
 	if err != nil {
 		c.orderbookMu.Lock()
