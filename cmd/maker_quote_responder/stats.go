@@ -105,24 +105,14 @@ func (mm *MarketMaker) updateBidAskSpread(instrument string, spread decimal.Deci
     mm.stats.BidAskSpread[instrument] = spread
 }
 
-// Utility functions
-
-var debugMode = false
-
-func debugLog(format string, args ...interface{}) {
-    if debugMode {
-        log.Printf("[DEBUG] "+format, args...)
-    }
-}
-
 // EnableDebugMode enables debug logging
 func EnableDebugMode() {
-    debugMode = true
+    SetDebugMode(true)
     log.Println("Debug mode enabled")
 }
 
 // DisableDebugMode disables debug logging
 func DisableDebugMode() {
-    debugMode = false
+    SetDebugMode(false)
     log.Println("Debug mode disabled")
 }
