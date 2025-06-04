@@ -1,4 +1,4 @@
-name: Code Coverage
+name: Tests and Code Coverage
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ main, master ]
 
 jobs:
-  coverage:
+  test-and-coverage:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -24,17 +24,13 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        cd cmd/maker_quote_responder
-        # Run tests only in the main package
-        # This excludes cmd/test_derive and test/ which are manual testing tools
-        # Continue even if tests fail so we can upload partial coverage
-        go test -coverprofile=coverage.txt -covermode=atomic . || true
+        # Run tests for all packages and fail if any test fails
+        go test -coverprofile=coverage.txt -covermode=atomic ./...
         
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
       with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        file: ./cmd/maker_quote_responder/coverage.txt
-        flags: maker_quote_responder
+        files: ./coverage.txt
+        flags: atomizer
         name: codecov-umbrella
         fail_ci_if_error: false

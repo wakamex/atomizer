@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/redis/go-redis"
+	"github.com/redis/go-redis/v9"
 )
 
 // ValkeyMarketCache implements Redis/Valkey-based caching

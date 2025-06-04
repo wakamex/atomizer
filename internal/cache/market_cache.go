@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"time"
+	
+	"github.com/wakamex/atomizer/internal/exchange/derive"
 )
 
 // MarketCache interface for caching market data
@@ -106,16 +108,16 @@ func NewCachedMarketLoader(cache MarketCache, ttl time.Duration) *CachedMarketLo
 	}
 }
 
-func (c *CachedMarketLoader) LoadDeriveMarkets() (map[string]DeriveInstrument, error) {
+func (c *CachedMarketLoader) LoadDeriveMarkets() (map[string]derive.DeriveInstrument, error) {
 	// Try to load from cache first
-	var markets map[string]DeriveInstrument
+	var markets map[string]derive.DeriveInstrument
 	if err := c.cache.GetMarkets("derive", &markets); err == nil {
 		return markets, nil
 	}
 
 	// Cache miss or expired - load from API
 	log.Printf("[Cache] Cache miss for Derive markets, loading from API...")
-	markets, err := LoadAllDeriveMarkets()
+	markets, err := derive.LoadAllDeriveMarkets()
 	if err != nil {
 		return nil, err
 	}

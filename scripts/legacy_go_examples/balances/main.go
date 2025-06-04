@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings" // Added for error checking
 	"time"    // Added for timeout/retry logic
+	
+	"github.com/wakamex/atomizer/internal/types"
 )
 
 // BalancesParams defines the structure for the params field for a 'balances' request.
@@ -39,7 +41,7 @@ func main() {
 		log.Fatalf("Error marshalling params: %v", err)
 	}
 
-	req := JSONRPCRequest{
+	req := types.JSONRPCRequest{
 		ID:      *requestID,
 		JSONRPC: "2.0",
 		Method:  "balances", // The daemon will look for this method
