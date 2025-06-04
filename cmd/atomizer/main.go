@@ -448,16 +448,15 @@ func runManualOrder(args []string) {
 		}
 	}
 	
-	// Create exchange
-	exchange, err := createExchange(cfg)
-	if err != nil {
-		log.Fatalf("Failed to create exchange: %v", err)
+	// Create market maker exchange directly
+	mmConfig := &types.MarketMakerConfig{
+		Exchange:         *exchangeName,
+		ExchangeTestMode: *testMode,
 	}
 	
-	// Ensure it's a market maker exchange
-	mmExchange, ok := exchange.(types.MarketMakerExchange)
-	if !ok {
-		log.Fatalf("Exchange %s does not implement MarketMakerExchange interface", *exchangeName)
+	mmExchange, err := exchange.NewExchange(mmConfig)
+	if err != nil {
+		log.Fatalf("Failed to create exchange: %v", err)
 	}
 	
 	// Create order configuration
