@@ -106,6 +106,9 @@ type MarketMakerConfig struct {
 	Improvement              decimal.Decimal // Amount to improve quotes by (tighten spread)
 	ImprovementReferenceSize decimal.Decimal // Minimum size for best bid/ask selection
 
+	// Aggression mode
+	Aggression decimal.Decimal // 0=join best, 0.9=near mid, 1.0+=aggressive (cross spread)
+
 	// One-sided quoting
 	BidOnly bool // Only place bid orders (buy side)
 	AskOnly bool // Only place ask orders (sell side)
@@ -127,6 +130,7 @@ func DefaultMarketMakerConfig() *MarketMakerConfig {
 		TargetFillRate:           decimal.NewFromFloat(0.1), // 10% fill rate target
 		Improvement:              decimal.NewFromFloat(0.1), // Default 0.1 improvement
 		ImprovementReferenceSize: decimal.NewFromFloat(0),   // Default 0 (use any size)
+		Aggression:               decimal.NewFromFloat(1.0), // Default 1.0 = aggressive mode
 	}
 }
 

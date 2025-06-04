@@ -81,7 +81,8 @@ market_maker:
   spread: 50                  # basis points
   min_spread: 10             
   size: 0.1
-  improvement: 0.05
+  improvement: 0.05           # For aggressive mode (aggression >= 1.0)
+  aggression: 0.7             # 0-0.9: conservative, 1.0+: aggressive
   max_position: 10.0
   
 risk:
@@ -147,6 +148,33 @@ WantedBy=multi-user.target
 
 ## Trading Operations
 
+### Understanding the Aggression Parameter
+
+The `--aggression` parameter is a unified control for market making behavior:
+
+**Conservative Mode (0.0 - 0.9):**
+- Places orders on your side of the spread only
+- Formula for bids: `bid_price = best_bid + aggression × (mid - best_bid)`
+- Formula for asks: `ask_price = best_ask - aggression × (best_ask - mid)`
+- Examples:
+  - `0.0`: Join the existing best bid/ask (passive)
+  - `0.5`: Place orders halfway between best and mid
+  - `0.9`: Place orders very close to mid (aggressive but safe)
+
+**Aggressive Mode (1.0+):**
+- Can cross the spread to capture more flow
+- Uses the `--improvement` parameter to determine cross amount
+- `1.0`: Default aggressive behavior
+- `>1.0`: Future use for even more aggressive strategies
+
+```bash
+# Examples
+atomizer market-maker --aggression 0.0    # Join best bid/ask
+atomizer market-maker --aggression 0.5    # Halfway to mid
+atomizer market-maker --aggression 0.9    # Near mid, max conservative
+atomizer market-maker --aggression 1.0    # Cross spread (default)
+```
+
 ### Starting the RFQ Responder
 ```bash
 # Basic operation
@@ -192,19 +220,43 @@ watch -n 5 atomizer inventory --summary
 
 ### Basic Market Making
 ```bash
-# Single strike
+# Conservative mode - join best bid/ask
 atomizer market-maker \
   --expiry 20250530 \
   --strikes 3000 \
-  --size 0.1
+  --size 0.1 \
+  --aggression 0.0
 
-# Multiple strikes
+# Conservative mode - halfway to mid
+atomizer market-maker \
+  --expiry 20250530 \
+  --strikes 3000 \
+  --size 0.1 \
+  --aggression 0.5
+
+# Aggressive mode - cross spread (default)
 atomizer market-maker \
   --expiry 20250530 \
   --strikes 2800,3000,3200 \
   --size 0.1 \
-  --spread 50
+  --aggression 1.0
 ```
+
+### Market Making Strategies
+
+The `--aggression` parameter controls quote placement:
+
+**Conservative Mode (aggression < 1.0):**
+- Keeps quotes on your side of the spread
+- `0.0`: Join the best bid/ask (least aggressive)
+- `0.5`: Place orders halfway between best and mid
+- `0.9`: Place orders very close to mid (most aggressive while staying on your side)
+
+**Aggressive Mode (aggression >= 1.0):**
+- Traditional mode where quotes can cross the spread
+- Uses `--improvement` parameter to tighten spreads
+- Can place bids above mid or asks below mid
+- Higher fill rates but more adverse selection risk
 
 ### Advanced Strategies
 
@@ -217,11 +269,17 @@ The market maker automatically adjusts spreads based on:
 
 #### Position-Based Pricing
 ```bash
-# Enable inventory-based pricing
+# Conservative with position limits
 atomizer market-maker \
-  --enable-inventory-skew \
+  --aggression 0.3 \
   --max-position 10.0 \
-  --skew-factor 0.1
+  --size 0.5
+
+# Aggressive with larger positions
+atomizer market-maker \
+  --aggression 1.2 \
+  --max-position 50.0 \
+  --improvement 0.2
 ```
 
 #### Smart Order Management
@@ -477,6 +535,32 @@ atomizer test-order \
   --amount 0.1
 ```
 
+#### Aggression Issues
+
+**Orders not filling:**
+- Try increasing aggression gradually
+- Check if spread is too wide
+- Verify market has liquidity
+
+```bash
+# Debug aggression settings
+atomizer market-maker \
+  --aggression 0.0 \
+  --size 0.01 \
+  --dry-run
+
+# Monitor actual quote placement
+atomizer market-maker \
+  --aggression 0.5 \
+  --debug \
+  --log-level trace
+```
+
+**Getting adverse selection:**
+- Reduce aggression below 1.0
+- Use conservative mode (0.3-0.7)
+- Increase minimum spread
+
 ### Log Analysis
 
 #### Log Locations
@@ -536,6 +620,30 @@ atomizer rfq-responder \
   --performance-mode \
   --cache-ttl 100ms \
   --parallel-quotes 4
+```
+
+#### Aggression Tuning for Performance
+Different aggression levels have different performance characteristics:
+
+```bash
+# High-frequency, low risk (many small trades)
+atomizer market-maker \
+  --aggression 0.1 \
+  --size 0.1 \
+  --refresh 1
+
+# Balanced approach
+atomizer market-maker \
+  --aggression 0.5 \
+  --size 0.5 \
+  --refresh 3
+
+# Aggressive, fewer but larger trades
+atomizer market-maker \
+  --aggression 1.0 \
+  --size 2.0 \
+  --refresh 5 \
+  --improvement 0.2
 ```
 
 #### Network Optimization
