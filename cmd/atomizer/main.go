@@ -79,6 +79,9 @@ func runMarketMaker(args []string) {
 	maxPosition := fs.Float64("max-position", 10.0, "Maximum position per instrument")
 	maxExposure := fs.Float64("max-exposure", 100.0, "Maximum total exposure")
 	
+	// Aggression parameter
+	aggression := fs.Float64("aggression", 1.0, "Aggression level: 0=join best, 0.9=near mid, 1.0+=cross spread (default: 1.0)")
+	
 	// Operational parameters
 	refresh := fs.Int("refresh", 5, "Refresh interval in seconds")
 	dryRun := fs.Bool("dry-run", false, "Dry run mode (no real orders)")
@@ -96,6 +99,11 @@ func runMarketMaker(args []string) {
 	// Validate one-sided flags
 	if *bidOnly && *askOnly {
 		log.Fatal("Cannot use both --bid-only and --ask-only")
+	}
+	
+	// Validate aggression parameter
+	if *aggression < 0 {
+		log.Fatal("Aggression must be non-negative")
 	}
 	
 	// Build instrument list
@@ -116,6 +124,7 @@ func runMarketMaker(args []string) {
 		ImprovementReferenceSize: decimal.NewFromFloat(*improvementRefSize),
 		CancelThreshold:  decimal.NewFromFloat(0.005), // 0.5% default
 		MaxOrdersPerSide: 1,
+		Aggression:       decimal.NewFromFloat(*aggression),
 		BidOnly:          *bidOnly,
 		AskOnly:          *askOnly,
 		// DryRun: *dryRun, // TODO: Add dry run support

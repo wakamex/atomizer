@@ -105,15 +105,40 @@ func (mm *MarketMaker) calculateQuotes(ticker *types.TickerUpdate, orderBook *ty
 		mm.adjustPricesForReferenceSize(orderBook, &referenceBid, &referenceAsk, midPrice)
 	}
 
-	// Calculate our quotes with improvement
-	bidPrice = referenceBid.Add(mm.config.Improvement)
-	askPrice = referenceAsk.Sub(mm.config.Improvement)
+	// Calculate our quotes based on aggression level
+	aggression := mm.config.Aggression
+	
+	if aggression.GreaterThanOrEqual(decimal.NewFromFloat(1.0)) {
+		// Aggressive mode (aggression >= 1.0): current behavior with improvement
+		bidPrice = referenceBid.Add(mm.config.Improvement)
+		askPrice = referenceAsk.Sub(mm.config.Improvement)
+	} else {
+		// Conservative mode (aggression < 1.0): place orders between our side and mid
+		// Clamp aggression to [0, 0.9] range for conservative mode
+		if aggression.LessThan(decimal.Zero) {
+			aggression = decimal.Zero
+		} else if aggression.GreaterThan(decimal.NewFromFloat(0.9)) {
+			aggression = decimal.NewFromFloat(0.9)
+		}
+		
+		// For bids: move from best_bid toward mid by aggression amount
+		// bid_price = best_bid + aggression * (mid - best_bid)
+		bidSpread := midPrice.Sub(referenceBid)
+		bidPrice = referenceBid.Add(bidSpread.Mul(aggression))
+		
+		// For asks: move from best_ask toward mid by aggression amount  
+		// ask_price = best_ask - aggression * (best_ask - mid)
+		askSpread := referenceAsk.Sub(midPrice)
+		askPrice = referenceAsk.Sub(askSpread.Mul(aggression))
+	}
 
 	// Ensure minimum spread
 	minSpread := midPrice.Mul(decimal.NewFromInt(int64(mm.config.MinSpreadBps)).Div(decimal.NewFromInt(10000)))
 	if askPrice.Sub(bidPrice).LessThan(minSpread) {
-		bidPrice = midPrice.Sub(minSpread.Div(decimal.NewFromInt(2)))
-		askPrice = midPrice.Add(minSpread.Div(decimal.NewFromInt(2)))
+		// Adjust symmetrically around mid to maintain minimum spread
+		halfMinSpread := minSpread.Div(decimal.NewFromInt(2))
+		bidPrice = midPrice.Sub(halfMinSpread)
+		askPrice = midPrice.Add(halfMinSpread)
 	}
 
 	return bidPrice, askPrice

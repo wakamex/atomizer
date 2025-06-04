@@ -17,8 +17,11 @@ export DERIVE_WALLET_ADDRESS=your_wallet_address
 # Run RFQ responder
 atomizer rfq-responder
 
-# Run market maker
+# Run market maker (aggressive mode by default)
 atomizer market-maker --expiry 20250530 --strikes 3000 --size 0.1
+
+# Run market maker (conservative mode)
+atomizer market-maker --expiry 20250530 --strikes 3000 --size 0.1 --aggression 0.5
 ```
 
 ## Features
@@ -52,6 +55,7 @@ atomizer market-maker [options]
   --strikes string      Comma-separated strike prices
   --size float          Quote size
   --spread int          Spread in basis points
+  --aggression float    Aggression: 0=join best, 0.9=near mid, 1.0+=cross spread
 
 # Manual Orders - Direct order placement
 atomizer manual-order [options]

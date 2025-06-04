@@ -121,8 +121,12 @@ Executes hedging strategies:
 Provides continuous two-sided quotes:
 - Order placement and management
 - Spread calculation based on volatility
-- Position-aware pricing
+- Position-aware pricing with aggression control
 - Inventory management
+
+**Aggression Parameter**:
+- `0.0-0.9`: Conservative mode - places orders between best bid/ask and mid
+- `1.0+`: Aggressive mode - can cross the spread for better fills
 
 ### Infrastructure Components
 

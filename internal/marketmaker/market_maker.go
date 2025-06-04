@@ -82,8 +82,17 @@ func (mm *MarketMaker) Start() error {
 	} else if mm.config.AskOnly {
 		mode = "ask-only"
 	}
-	log.Printf("Starting market maker: %d instruments, %s per instrument",
-		len(mm.config.Instruments), mode)
+	
+	aggression := mm.config.Aggression.InexactFloat64()
+	var strategyMode string
+	if aggression >= 1.0 {
+		strategyMode = fmt.Sprintf("aggressive (cross-spread, aggression=%.1f)", aggression)
+	} else {
+		strategyMode = fmt.Sprintf("conservative (stay on side, aggression=%.1f)", aggression)
+	}
+	
+	log.Printf("Starting market maker: %d instruments, %s per instrument, %s",
+		len(mm.config.Instruments), mode, strategyMode)
 
 	// Clear stale state
 	mm.mu.Lock()
