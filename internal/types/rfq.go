@@ -13,6 +13,7 @@ type RFQNotification struct {
 // RFQResult contains the actual details of the RFQ
 type RFQResult struct {
 	ID         string `json:"id,omitempty"`
+	RFQId      string `json:"rfqId,omitempty"` // Add RFQId field
 	Asset      string `json:"asset"`
 	AssetName  string `json:"assetName,omitempty"`
 	OptionType string `json:"optionType,omitempty"`
@@ -24,7 +25,7 @@ type RFQResult struct {
 	MaxFee     string `json:"maxFee,omitempty"`
 	Subaccount int    `json:"subaccount,omitempty"`
 	ChainID    int    `json:"chainId,omitempty"`
-	Expiry     int    `json:"expiry,omitempty"`
+	Expiry     int64  `json:"expiry,omitempty"` // Change to int64
 	IsPut      bool   `json:"isPut,omitempty"`
 	Strike     string `json:"strike,omitempty"`
 	IsTakerBuy bool   `json:"isTakerBuy,omitempty"`
