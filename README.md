@@ -1,210 +1,207 @@
 # Atomizer - Unified Options Trading Toolkit
 
-Atomizer is a comprehensive command-line toolkit for options trading, providing automated market making, RFQ response, market analysis, and position management capabilities.
+Atomizer is a high-performance command-line toolkit for automated options trading, providing market making, RFQ response, position management, and real-time market analysis across multiple exchanges.
+
+## Quick Start
+
+```bash
+# Clone and build
+git clone https://github.com/wakamex/atomizer.git
+cd atomizer
+./build.sh
+
+# Set up environment
+export DERIVE_PRIVATE_KEY=your_private_key
+export DERIVE_WALLET_ADDRESS=your_wallet_address
+
+# Run RFQ responder
+./bin/atomizer rfq-responder
+
+# Run market maker
+./bin/atomizer market-maker --expiry 20250530 --strikes 3000 --size 0.1
+```
 
 ## Features
 
-- **Unified CLI**: Single `atomizer` command with subcommands for all functionality
-- **RFQ Responder**: Automated quote generation for Request-for-Quote systems
-- **Market Analysis**: Real-time liquidity analysis with spread metrics and volatility comparisons
-- **Position Management**: Track inventory and P&L across multiple exchanges
-- **Market Data Monitor**: Collect and store real-time order book data with time-series database integration
-- **Multi-Exchange Support**: Works with Derive/Lyra and Deribit (more coming soon)
-- **Automated Hedging**: Hedge positions automatically when trades are executed
+- **Automated Market Making**: Continuous two-sided quoting with smart order management
+- **RFQ Response System**: Real-time quote generation with automatic hedging
+- **Multi-Exchange Support**: Unified interface for Derive/Lyra, Deribit, and CCXT-compatible exchanges
+- **Risk Management**: Position limits, Greeks calculation, and automated hedging
+- **Market Analysis**: Liquidity scoring, volatility analysis, and spread metrics
+- **Real-Time Monitoring**: Market data collection with time-series storage
 
-## Progress
+## Documentation
 
-sdk actions:
-- [x] approve - leave in the cli
-- [x] balances - debugging
-- [x] connect - working w/ default channel id
-- [ ] positions
-- [x] quote - maker_quote_response.go
-- [ ] transfer
-combo:
-- [x] maker_quote_response.go (connect and quote)
-- [x] hedging integration with Deribit
-- [x] market analysis tools (inventory, markets, send_quote)
-- [x] market data monitoring with time-series storage
+- **[Architecture Guide](./ARCHITECTURE.md)**: System design, components, and technical implementation
+- **[Operations Guide](./OPERATIONS.md)**: Deployment, configuration, trading strategies, and troubleshooting
 
+## Commands
+
+### Core Trading Commands
+
+```bash
+# RFQ Responder - Automated quote generation
+atomizer rfq-responder [options]
+  --exchange string     Exchange to use (derive/deribit)
+  --enable-hedging      Enable automatic hedging
+  --dummy-price string  Fallback price for testing
+
+# Market Maker - Continuous quoting
+atomizer market-maker [options]
+  --expiry string       Option expiry (YYYYMMDD)
+  --strikes string      Comma-separated strike prices
+  --size float          Quote size
+  --spread int          Spread in basis points
+
+# Manual Orders - Direct order placement
+atomizer manual-order [options]
+  --instrument string   Instrument to trade
+  --side string         Order side (buy/sell)
+  --price float         Order price
+  --amount float        Order amount
+```
+
+### Analysis & Monitoring
+
+```bash
+# Market Analysis - Liquidity and pricing analysis
+atomizer analyze --underlying ETH --expiry 0
+
+# Position Inventory - Current positions and P&L
+atomizer inventory
+
+# Market Monitor - Real-time data collection
+atomizer market-monitor start --instruments ETH-*
+```
+
+### Utility Commands
+
+```bash
+# List available markets
+atomizer markets --underlying ETH
+
+# Send test quote
+atomizer send-quote --instrument ETH-20250530-3000-C --side buy --price 100
+
+# System health check
+atomizer health --verbose
+```
 
 ## Installation
 
 ### Prerequisites
 - Go 1.21 or later
 - Git
+- Linux/macOS (Windows via WSL)
 
-### Quick Start
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/wakamex/atomizer.git
-   cd atomizer
-   ```
-
-2. Build all components:
-   ```bash
-   ./build.sh
-   ```
-
-3. Add to PATH (optional):
-   ```bash
-   export PATH=$PATH:$(pwd)/bin
-   ```
-
-## Usage
+### Building from Source
 
 ```bash
-# Show available commands
-atomizer help
+# Clone repository
+git clone https://github.com/wakamex/atomizer.git
+cd atomizer
 
-# Get help for a specific command
-atomizer help <command>
+# Update submodules
+git submodule update --init --recursive
 
-# Run the RFQ responder
-atomizer rfq --derive-key $PRIVATE_KEY --derive-wallet $WALLET
+# Build all binaries
+./build.sh
 
-# Run market maker
-atomizer market-maker -expiry 20250530 -strikes 2800 --improvement 0.05
-
-# Analyze options markets
-atomizer analyze -u ETH -e 0
-
-# Show current positions
-atomizer inventory
-
-# List available markets
-atomizer markets --underlying ETH
-
-# Send a single quote
-atomizer send-quote -i ETH-20250530-2800-C -s buy -p 100 --size 0.1
-
-# Monitor market data
-atomizer market-monitor start --exchanges derive,deribit --instruments ETH-*
+# Optional: Add to PATH
+export PATH=$PATH:$(pwd)/bin
 ```
 
-## Commands
-
-### `atomizer rfq`
-Runs the RFQ (Request for Quote) responder that connects to exchange WebSocket APIs and automatically provides quotes based on market conditions.
-
-**Key features:**
-- Real-time quote generation
-- Automatic hedging on execution
-- Multi-exchange support (Derive, Deribit)
-- Configurable pricing strategies
-
-### `atomizer market-maker`
-Runs continuous two-sided quoting for specified options.
-
-**Key features:**
-- Automated bid/ask order placement
-- Configurable price improvement
-- Position and exposure limits
-- Smart order replacement to minimize gaps
-- Support for multiple strikes simultaneously
-
-**Example:**
-```bash
-atomizer market-maker -expiry 20250530 -strikes 2800,3000,3200 --size 0.1
-```
-
-### `atomizer analyze`
-Analyzes options market liquidity and pricing across exchanges.
-
-**Key features:**
-- Liquidity scoring based on volume, trades, open interest, and spreads
-- Spread analysis (absolute and percentage)
-- Implied volatility comparisons
-- Greeks and pricing metrics
-
-### `atomizer inventory`
-Shows current positions and P&L across configured exchanges.
-
-### `atomizer markets`
-Lists available markets and instruments with filtering options.
-
-### `atomizer send-quote`
-Utility to send individual quotes/orders for testing.
-
-### `atomizer market-monitor`
-Collects and stores real-time market data from multiple exchanges.
-
-**Key features:**
-- Real-time order book depth collection (configurable depth)
-- Spot price feeds for accurate USD conversion
-- Time-series data storage with VictoriaMetrics
-- Multi-exchange support with instrument name conversion
-- Debug mode for troubleshooting WebSocket connections
-
-**Subcommands:**
-- `setup` - Download and configure VictoriaMetrics database
-- `start` - Start collecting market data
-- `stats` - Show current statistics (coming soon)
-- `export` - Export data using PromQL queries (coming soon)
-
-**Example:**
-```bash
-# Set up VictoriaMetrics
-atomizer market-monitor setup
-
-# Start monitoring with order book depth
-atomizer market-monitor start --orderbook --depth 10 --instruments ETH-*-C --debug
-
-# Monitor specific instruments
-atomizer market-monitor start --exchanges deribit --instruments ETH-1JUN25-2600-C
-```
-
-## Architecture
-
-### Applications
-
-The primary application that connects to Rysk Finance API, listens for RFQs, responds with quotes, and automatically hedges on Deribit.
-
-[**Detailed Instructions**](./cmd/maker_quote_responder/README.md)
-
-Key features:
-- Real-time quote generation using Deribit prices
-- Automatic hedging when trades are executed
-- Configurable price premiums and slippage protection
-- Comprehensive error handling and fallback mechanisms
-
-### 2. Market Analysis Tools
-
-#### Inventory Command (`cmd/inventory/`)
-Displays current market inventory with bid/ask spreads, delta, and APY.
+### Docker
 
 ```bash
-cd cmd/inventory && ./inventory.sh
+# Build image
+docker build -t atomizer .
+
+# Run container
+docker run -e DERIVE_PRIVATE_KEY=$DERIVE_PRIVATE_KEY atomizer rfq-responder
 ```
 
-#### Markets Command (`cmd/markets/`)
-Fetches and saves market asset data from the Rysk API.
+## Configuration
+
+### Environment Variables
 
 ```bash
-cd cmd/markets && ./markets.sh
+# Exchange Configuration
+EXCHANGE_NAME=derive              # derive, deribit, or ccxt
+EXCHANGE_TEST_MODE=false          # Use testnet
+
+# Derive Authentication
+DERIVE_PRIVATE_KEY=0x...          # Private key (without 0x prefix)
+DERIVE_WALLET_ADDRESS=0x...       # Wallet address
+
+# Deribit Authentication  
+DERIBIT_API_KEY=your_key
+DERIBIT_API_SECRET=your_secret
+
+# RFQ Settings
+RFQ_ASSET_ADDRESSES=0x7b79...     # Contract addresses
+QUOTE_VALID_DURATION=30           # Quote validity in seconds
 ```
 
-[**Markets Tool Documentation**](./cmd/markets/README.md)
-
-#### Send Quote Tool (`cmd/send_quote/`)
-Sends RFQs to multiple markets simultaneously and measures response times.
+### Risk Parameters
 
 ```bash
-cd cmd/send_quote && ./send_rfq.sh
+# Position Limits
+MAX_POSITION_DELTA=10.0           # Maximum delta exposure
+MAX_POSITION_SIZE=100.0           # Per-instrument limit
+
+# Hedging
+ENABLE_GAMMA_HEDGING=true         # Enable gamma hedging
+GAMMA_THRESHOLD=0.5               # Gamma hedge threshold
 ```
 
-[**Send Quote Documentation**](./cmd/send_quote/README.md)
+## Project Structure
 
-## Submodule
+```
+atomizer/
+├── cmd/
+│   └── atomizer/          # Main CLI application
+├── internal/              # Core business logic
+│   ├── quoter/            # Quote generation engine
+│   ├── arbitrage/         # Trade orchestration
+│   ├── marketmaker/       # Market making logic
+│   ├── hedging/           # Hedging strategies
+│   ├── risk/              # Risk management
+│   └── exchange/          # Exchange adapters
+├── scripts/               # Utility scripts
+└── sdk/                   # Rysk SDK submodule
+```
 
-The `sdk` directory is a submodule pointing to the [ryskV12-cli](https://github.com/wakamex/ryskV12-cli) repository.
+## Development
 
-To update the submodule to the latest commit from its remote:
 ```bash
-cd sdk
-git pull
-cd ..
-git add sdk
-git commit -m "Update sdk submodule"
+# Run tests
+go test ./...
+
+# Run with debug logging
+atomizer rfq-responder --debug --log-level trace
+
+# Profile performance
+atomizer debug profile --cpu --duration 30s
+
+# Format code
+go fmt ./...
 ```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/wakamex/atomizer/issues)
+- **Documentation**: [Architecture](./ARCHITECTURE.md) | [Operations](./OPERATIONS.md)
+- **Examples**: See the `examples/` directory for sample configurations
