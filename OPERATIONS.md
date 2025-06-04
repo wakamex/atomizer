@@ -95,14 +95,14 @@ risk:
 
 ### Local Development
 ```bash
-# Clone and build
+# Clone and install
 git clone https://github.com/wakamex/atomizer.git
 cd atomizer
-./build.sh
+go install ./cmd/atomizer
 
 # Run with environment file
 source .env.local
-./bin/atomizer rfq-responder
+atomizer rfq-responder
 ```
 
 ### Docker Deployment
@@ -110,11 +110,11 @@ source .env.local
 FROM golang:1.21 AS builder
 WORKDIR /app
 COPY . .
-RUN ./build.sh
+RUN go build -o atomizer ./cmd/atomizer
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
-COPY --from=builder /app/bin/atomizer /usr/local/bin/
+COPY --from=builder /app/atomizer /usr/local/bin/
 CMD ["atomizer", "rfq-responder"]
 ```
 
