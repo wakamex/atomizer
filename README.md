@@ -5,20 +5,20 @@ Atomizer is a high-performance command-line toolkit for automated options tradin
 ## Quick Start
 
 ```bash
-# Clone and build
+# Clone and install
 git clone https://github.com/wakamex/atomizer.git
 cd atomizer
-./build.sh
+go install ./cmd/atomizer
 
 # Set up environment
 export DERIVE_PRIVATE_KEY=your_private_key
 export DERIVE_WALLET_ADDRESS=your_wallet_address
 
 # Run RFQ responder
-./bin/atomizer rfq-responder
+atomizer rfq-responder
 
 # Run market maker
-./bin/atomizer market-maker --expiry 20250530 --strikes 3000 --size 0.1
+atomizer market-maker --expiry 20250530 --strikes 3000 --size 0.1
 ```
 
 ## Features
@@ -101,14 +101,11 @@ atomizer health --verbose
 git clone https://github.com/wakamex/atomizer.git
 cd atomizer
 
-# Update submodules
-git submodule update --init --recursive
+# Install the CLI
+go install ./cmd/atomizer
 
-# Build all binaries
-./build.sh
-
-# Optional: Add to PATH
-export PATH=$PATH:$(pwd)/bin
+# Or build locally
+go build -o atomizer ./cmd/atomizer
 ```
 
 ### Docker
