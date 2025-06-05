@@ -612,6 +612,10 @@ func (gh *PureGammaHedger) executeMarketHedge(size decimal.Decimal) error {
 
 // executeMinSizeClose handles closing positions below minimum size
 // Strategy: First increase position by minimum order size, then close it entirely
+// Example: To close -0.08 ETH position (below 0.1 minimum):
+//   1. Sell 0.1 ETH more to reach -0.18 ETH
+//   2. Buy 0.18 ETH to close entire position
+// This incurs a small spread cost but allows closing positions below exchange minimums
 func (gh *PureGammaHedger) executeMinSizeClose(hedgeSize, currentPosition, minOrderSize decimal.Decimal) error {
 	instrument := "ETH-PERP"
 	

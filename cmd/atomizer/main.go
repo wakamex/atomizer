@@ -37,7 +37,8 @@ func main() {
 		fmt.Println("  market-maker      Run the market maker")
 		fmt.Println("  rfq-responder     Run the RFQ responder")
 		fmt.Println("  manual-order      Place a manual order")
-		fmt.Println("  pure-gamma-hedger Run the pure gamma hedger")
+		fmt.Println("  pure-gamma-hedger Run the pure gamma hedger (closes perp positions when no options exist)")
+		fmt.Println("                    Options: --delta-threshold, --min-hedge-size, --hedge-interval, --aggressiveness")
 		os.Exit(1)
 	}
 
@@ -437,7 +438,7 @@ func runPureGammaHedger(args []string) {
 	deltaThreshold := fs.Float64("delta-threshold", 0.1, "Maximum delta before hedging")
 	minHedgeSize := fs.Float64("min-hedge-size", 0.1, "Minimum hedge size")
 	hedgeInterval := fs.Int("hedge-interval", 30, "Hedge check interval in seconds")
-	aggressiveness := fs.Float64("aggressiveness", 0.7, "Order placement aggressiveness (0-1)")
+	aggressiveness := fs.Float64("aggressiveness", 0.7, "Order placement aggressiveness (0=passive at bid/ask, 1=cross spread, >1=beyond spread)")
 	debug := fs.Bool("debug", false, "Enable debug logging")
 	
 	// Derive-specific flags
