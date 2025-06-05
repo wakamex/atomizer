@@ -36,9 +36,10 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: atomizer <command> [options]")
 		fmt.Println("Commands:")
-		fmt.Println("  market-maker    Run the market maker")
-		fmt.Println("  rfq-responder   Run the RFQ responder")
-		fmt.Println("  manual-order    Place a manual order")
+		fmt.Println("  market-maker      Run the market maker")
+		fmt.Println("  rfq-responder     Run the RFQ responder")
+		fmt.Println("  manual-order      Place a manual order")
+		fmt.Println("  pure-gamma-hedger Run the pure gamma hedger")
 		os.Exit(1)
 	}
 
@@ -49,6 +50,8 @@ func main() {
 		runRFQResponder(os.Args[2:])
 	case "manual-order":
 		runManualOrder(os.Args[2:])
+	case "pure-gamma-hedger":
+		runPureGammaHedger(os.Args[2:])
 	default:
 		fmt.Printf("Unknown command: %s\n", os.Args[1])
 		os.Exit(1)
@@ -474,4 +477,52 @@ func runManualOrder(args []string) {
 	if err := manual.RunManualOrder(cfg, mmExchange, orderCfg); err != nil {
 		log.Fatalf("Failed to place order: %v", err)
 	}
+}
+
+func runPureGammaHedger(args []string) {
+	// Parse flags
+	fs := flag.NewFlagSet("pure-gamma-hedger", flag.ExitOnError)
+	
+	// Exchange selection
+	exchangeName := fs.String("exchange", "derive", "Exchange to use (derive, deribit)")
+	testMode := fs.Bool("test", false, "Use test environment")
+	
+	// Gamma hedging parameters
+	deltaThreshold := fs.Float64("delta-threshold", 0.1, "Maximum delta before hedging")
+	minHedgeSize := fs.Float64("min-hedge-size", 0.1, "Minimum hedge size")
+	hedgeInterval := fs.Int("hedge-interval", 30, "Hedge check interval in seconds")
+	aggressiveness := fs.Float64("aggressiveness", 0.7, "Order placement aggressiveness (0-1)")
+	
+	// Derive-specific flags
+	derivePrivateKey := fs.String("derive-private-key", os.Getenv("DERIVE_PRIVATE_KEY"), "Derive private key (hex)")
+	deriveWalletAddress := fs.String("derive-wallet-address", os.Getenv("DERIVE_WALLET_ADDRESS"), "Derive wallet address")
+	
+	// Deribit-specific flags
+	deribitApiKey := fs.String("deribit-api-key", os.Getenv("DERIBIT_API_KEY"), "Deribit API key")
+	deribitApiSecret := fs.String("deribit-api-secret", os.Getenv("DERIBIT_API_SECRET"), "Deribit API secret")
+	
+	fs.Parse(args)
+	
+	// Create configuration
+	cfg := &config.Config{
+		ExchangeName:     *exchangeName,
+		ExchangeTestMode: *testMode,
+		DeribitApiKey:    *deribitApiKey,
+		DeribitApiSecret: *deribitApiSecret,
+		PrivateKey:       *derivePrivateKey,
+		MakerAddress:     *deriveWalletAddress,
+	}
+	
+	// Parse private key if using Derive
+	if *exchangeName == "derive" {
+		if *derivePrivateKey == "" || *deriveWalletAddress == "" {
+			log.Fatal("Derive requires DERIVE_PRIVATE_KEY and DERIVE_WALLET_ADDRESS")
+		}
+		if err := parsePrivateKey(cfg); err != nil {
+			log.Fatalf("Failed to parse private key: %v", err)
+		}
+	}
+	
+	// TODO: Implement pure gamma hedger
+	log.Fatal("Pure gamma hedger not yet implemented in the new structure. Please use the old CLI at cmd/maker_quote_responder for now.")
 }
