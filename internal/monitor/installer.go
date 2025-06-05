@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 type VMInstaller struct {
@@ -45,24 +44,18 @@ func (v *VMInstaller) GetLatestReleaseURL() (string, error) {
 	}
 
 	// Determine the asset name based on OS and architecture
-	// VictoriaMetrics uses the pattern: victoria-metrics-amd64-{version}.tar.gz
-	osArch := runtime.GOARCH
-	if runtime.GOOS == "darwin" {
-		osArch = "darwin-" + osArch
-	} else if runtime.GOOS == "windows" {
-		osArch = "windows-" + osArch
-	}
-	// For linux, it's just the arch (e.g., "amd64")
-	
-	assetPattern := fmt.Sprintf("victoria-metrics-%s-", osArch)
+	// VictoriaMetrics uses the pattern: victoria-metrics-{os}-{arch}-{version}.tar.gz
+	// We want the single-node version (not cluster, not enterprise)
+	assetName := fmt.Sprintf("victoria-metrics-%s-%s-%s.tar.gz", 
+		runtime.GOOS, runtime.GOARCH, release.TagName)
 
 	for _, asset := range release.Assets {
-		if strings.Contains(asset.Name, assetPattern) && strings.HasSuffix(asset.Name, ".tar.gz") {
+		if asset.Name == assetName {
 			return asset.BrowserDownloadURL, nil
 		}
 	}
 
-	return "", fmt.Errorf("no suitable release found for pattern: %s*.tar.gz", assetPattern)
+	return "", fmt.Errorf("no suitable release found for: %s", assetName)
 }
 
 func (v *VMInstaller) Setup() error {

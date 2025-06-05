@@ -8,8 +8,6 @@ import (
 )
 
 func TestGetLatestReleaseURL(t *testing.T) {
-	t.Skip("Skipping test that requires external GitHub API access")
-	
 	installer := NewVMInstaller()
 
 	url, err := installer.GetLatestReleaseURL()
@@ -54,6 +52,7 @@ func TestVMInstallerSetup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
+	
 
 	installer := NewVMInstaller()
 
