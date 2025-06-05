@@ -1,14 +1,12 @@
 package main
 
 import (
-	"crypto/ecdsa"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -309,13 +307,8 @@ func runRFQResponder(args []string) {
 	log.Println("Shutting down RFQ responder...")
 }
 
-// parsePrivateKey parses and validates the private key from the config
+// parsePrivateKey parses the private key from the config
 func parsePrivateKey(cfg *config.Config) error {
-	// Validate format
-	if err := validatePrivateKey(cfg.PrivateKey, cfg.MakerAddress); err != nil {
-		return err
-	}
-	
 	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(cfg.PrivateKey, "0x"))
 	if err != nil {
 		return fmt.Errorf("invalid private key: %w", err)
@@ -324,53 +317,6 @@ func parsePrivateKey(cfg *config.Config) error {
 	return nil
 }
 
-// validatePrivateKey validates private key format and derives address
-func validatePrivateKey(privateKeyHex, expectedAddress string) error {
-	// Remove 0x prefix if present
-	privateKeyHex = strings.TrimPrefix(privateKeyHex, "0x")
-	
-	// Check length
-	if len(privateKeyHex) != 64 {
-		return fmt.Errorf("private key must be 64 hex characters (got %d)", len(privateKeyHex))
-	}
-	
-	// Check if valid hex
-	if !regexp.MustCompile(`^[0-9a-fA-F]+$`).MatchString(privateKeyHex) {
-		return fmt.Errorf("private key must contain only hexadecimal characters")
-	}
-	
-	// Derive address
-	derivedAddr, err := privateKeyToAddress(privateKeyHex)
-	if err != nil {
-		return fmt.Errorf("failed to derive address: %w", err)
-	}
-	
-	// Compare addresses
-	if !strings.EqualFold(derivedAddr, expectedAddress) {
-		return fmt.Errorf("private key doesn't match maker address\nDerived: %s\nExpected: %s", 
-			derivedAddr, expectedAddress)
-	}
-	
-	log.Printf("✓ Private key validation successful - derived address matches: %s", expectedAddress)
-	return nil
-}
-
-// privateKeyToAddress derives the Ethereum address from a private key
-func privateKeyToAddress(privateKeyHex string) (string, error) {
-	privateKey, err := crypto.HexToECDSA(privateKeyHex)
-	if err != nil {
-		return "", err
-	}
-	
-	publicKey := privateKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		return "", fmt.Errorf("error casting public key to ECDSA")
-	}
-	
-	address := crypto.PubkeyToAddress(*publicKeyECDSA)
-	return address.Hex(), nil
-}
 
 // createExchange creates an exchange instance based on config
 func createExchange(cfg *config.Config) (types.Exchange, error) {
@@ -492,6 +438,7 @@ func runPureGammaHedger(args []string) {
 	minHedgeSize := fs.Float64("min-hedge-size", 0.1, "Minimum hedge size")
 	hedgeInterval := fs.Int("hedge-interval", 30, "Hedge check interval in seconds")
 	aggressiveness := fs.Float64("aggressiveness", 0.7, "Order placement aggressiveness (0-1)")
+	debug := fs.Bool("debug", false, "Enable debug logging")
 	
 	// Derive-specific flags
 	derivePrivateKey := fs.String("derive-private-key", os.Getenv("DERIVE_PRIVATE_KEY"), "Derive private key (hex)")
@@ -523,6 +470,61 @@ func runPureGammaHedger(args []string) {
 		}
 	}
 	
-	// TODO: Implement pure gamma hedger
-	log.Fatal("Pure gamma hedger not yet implemented in the new structure. Please use the old CLI at cmd/maker_quote_responder for now.")
+	// Validate aggressiveness
+	if *aggressiveness < 0 || *aggressiveness > 1 {
+		log.Fatal("Aggressiveness must be between 0 and 1")
+	}
+	
+	// Create market maker config for exchange
+	mmConfig := &types.MarketMakerConfig{
+		Exchange:         *exchangeName,
+		ExchangeTestMode: *testMode,
+	}
+	
+	// Create exchange
+	log.Printf("Creating %s exchange (test mode: %v)...", *exchangeName, *testMode)
+	mmExchange, err := exchange.NewExchange(mmConfig)
+	if err != nil {
+		log.Fatalf("Failed to create exchange: %v", err)
+	}
+	
+	// Create pure gamma hedger
+	hedger := hedging.NewPureGammaHedger(mmExchange)
+	
+	// Set parameters
+	hedger.SetParameters(
+		decimal.NewFromFloat(*deltaThreshold),
+		decimal.NewFromFloat(*minHedgeSize),
+		decimal.NewFromFloat(*aggressiveness),
+		time.Duration(*hedgeInterval) * time.Second,
+	)
+	
+	// Enable debug mode if requested
+	hedger.SetDebugMode(*debug)
+	
+	log.Printf("========================================")
+	log.Printf("Starting Pure Gamma Hedger")
+	log.Printf("Configuration:")
+	log.Printf("  Exchange: %s (test mode: %v)", *exchangeName, *testMode)
+	log.Printf("  Delta Threshold: %.4f ETH", *deltaThreshold)
+	log.Printf("  Min Hedge Size: %.4f ETH", *minHedgeSize)
+	log.Printf("  Hedge Interval: %d seconds", *hedgeInterval)
+	log.Printf("  Aggressiveness: %.2f (%.0f%% through spread)", *aggressiveness, *aggressiveness*100)
+	log.Printf("  Debug Mode: %v", *debug)
+	log.Printf("========================================")
+	
+	// Start hedger
+	if err := hedger.Start(); err != nil {
+		log.Fatalf("Failed to start hedger: %v", err)
+	}
+	
+	// Wait for interrupt signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	
+	log.Println("Pure gamma hedger running. Press Ctrl+C to stop...")
+	<-sigCh
+	
+	log.Println("Shutting down pure gamma hedger...")
+	hedger.Stop()
 }

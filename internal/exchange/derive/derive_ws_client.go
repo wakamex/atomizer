@@ -432,9 +432,9 @@ func (c *DeriveWSClient) handleMessages() {
 			c.mu.Unlock()
 			continue
 		} else if len(message) < 500 {
-			shared.DeriveDebugLog("[Derive WS] Raw message: %s", string(message))
+			shared.DeriveWSDebugLog("[Derive WS] Raw message: %s", string(message))
 		} else {
-			shared.DeriveDebugLog("[Derive WS] Raw message (truncated): %s...", string(message[:500]))
+			shared.DeriveWSDebugLog("[Derive WS] Raw message (truncated): %s...", string(message[:500]))
 		}
 
 		// First try to parse as a subscription update
@@ -544,7 +544,7 @@ func (c *DeriveWSClient) updateOrderBook(instrument string, data *struct {
 	}
 	c.orderbookMu.Unlock()
 
-	shared.DeriveDebugLog("[Derive WS] Updated orderbook for %s: %d bids, %d asks", instrument, len(bids), len(asks))
+	shared.DeriveWSDebugLog("[Derive WS] Updated orderbook for %s: %d bids, %d asks", instrument, len(bids), len(asks))
 }
 
 // sendRequest sends a request and returns a channel for the response
