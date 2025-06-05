@@ -22,6 +22,9 @@ atomizer market-maker --expiry 20250530 --strikes 3000 --size 0.1
 
 # Run market maker (conservative mode)
 atomizer market-maker --expiry 20250530 --strikes 3000 --size 0.1 --aggression 0.5
+
+# Run pure gamma hedger (closes perp positions when no options exist)
+atomizer pure-gamma-hedger --aggressiveness 1.0  # Cross spread for immediate fills
 ```
 
 ## Features

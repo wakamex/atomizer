@@ -17,12 +17,20 @@ import (
 	"github.com/wakamex/atomizer/internal/exchange/shared"
 )
 
-// Global debug mode flag
-var debugMode bool
+// Global debug mode flags
+var (
+	debugMode   bool // General debug mode
+	debugModeWS bool // WebSocket specific debug mode
+)
 
 // SetDebugMode sets the global debug mode
 func SetDebugMode(enabled bool) {
 	debugMode = enabled
+}
+
+// SetDebugModeWS sets WebSocket-specific debug mode
+func SetDebugModeWS(enabled bool) {
+	debugModeWS = enabled
 }
 
 // DeriveInstrumentDetails represents instrument details from Derive API
